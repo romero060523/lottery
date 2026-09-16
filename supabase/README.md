@@ -18,8 +18,10 @@ administrativo de migraciones, que puede acceder a las tablas sin RLS.
 `seeds/desarrollo.sql` está fuera de `migrations/` y no se ejecuta automáticamente.
 Es exclusivamente para desarrollo: crea un sorteo activo con precio de **5000 COP**,
 capacidad de **5000 tickets** y cuatro premios (uno mayor y tres secundarios).
+El tope por compra usa el valor predeterminado de **50 tickets comprados**.
 Los UUID fijos permiten repetirlo sin duplicar registros ni sobrescribir cambios.
 No crea administradores, compradores ni comprobantes. Todos los montos son enteros.
+`sorteos.edicion_numero` es único: no pueden registrarse dos sorteos de la misma edición.
 
 ## Compra pública y SECURITY DEFINER
 
@@ -32,12 +34,30 @@ implícita de `PUBLIC` y solo se habilitan las tres RPC de compra/cálculo para
 
 Antes de escribir se comprueban cantidad positiva, valores nulos, tipo de documento,
 longitudes de nombre (1–200), teléfono y documento (1–32), sorteo activo, ventana
-de ventas, cupo y rango de enteros. Los textos se recortan en los extremos; estas
+de ventas, tope por compra, cupo y rango de enteros. Los textos se recortan en los extremos; estas
 validaciones **no acreditan identidad ni propiedad del teléfono/documento**.
 El precio se lee del sorteo dentro del mismo `UPDATE` que reserva cupo; los gratis
 se calculan como `cantidad / 4`. El cliente no puede elegir monto, gratis, código,
 estado ni auditoría. `calcular_monto_total` es solo una previsualización: su precio
-de entrada nunca determina el precio de una compra.
+de entrada nunca determina el precio de una compra. Con cantidad cero y precio
+válido devuelve `0/0/0/0` para el estado inicial del selector. Comprar cero tickets
+sigue siendo inválido, al igual que cantidades negativas o nulas.
+
+`sorteos.max_tickets_por_compra` es un entero positivo, obligatorio y con valor
+predeterminado 50. El admin puede configurarlo por edición al crear o editar un
+sorteo. Se compara con `p_cantidad` (tickets pagados); los gratis se suman solamente
+al consumo de cupo. Por ejemplo, 50 comprados reservan 62 tickets con la promoción.
+La comprobación forma parte del `UPDATE` que reserva: un cambio concurrente del
+tope no puede eludir la condición. Si no se reserva, se consulta el límite vigente
+del sorteo habilitado para distinguir el error:
+
+| `error.code` de la RPC | Significado |
+| --- | --- |
+| `P1001` | La cantidad comprada supera `max_tickets_por_compra`; el mensaje incluye el máximo. |
+| `P0001` | No hay cupo, la venta no está habilitada o el monto excede el rango admitido. |
+
+El frontend puede discriminar por código sin interpretar el texto del mensaje.
+Superar el tope no crea boletos ni modifica el contador.
 
 La reserva usa un `UPDATE` condicionado por capacidad, incluidos los tickets gratis.
 La creación del boleto pertenece a la misma transacción: si falla, la reserva se
@@ -48,16 +68,18 @@ sin consultar compras anteriores del documento. El código secuencial conserva
 al menos cinco dígitos sin truncarse al superar `99999`; no es un secreto de acceso.
 
 Esta protección de privilegios no sustituye controles contra abuso. Captcha,
-idempotencia, límites de reservas y caducidad de pendientes siguen pendientes de
-decisión, como anticipa la arquitectura. Al permitir llamada directa con anon,
-un captcha solamente en el formulario podría eludirse.
+idempotencia y límites acumulados de reservas siguen pendientes de decisión;
+el tope por llamada no impide realizar varias compras. La caducidad de pendientes
+(TTL) se implementará en otro PR. Al permitir llamada directa con anon, un captcha
+solamente en el formulario podría eludirse.
 
 ## Datos personales y administración
 
 | Recurso | Público (`anon`) | Sesión sin admin | Admin de la whitelist |
 | --- | --- | --- | --- |
 | Sorteos | Lee activos | Lee activos | Lee todos y administra configuración |
-| Premios y ganadores | Lee | Lee | Lee, crea, edita y elimina |
+| Premios | Lee los de sorteos activos | Lee los de sorteos activos | Lee todos, crea, edita y elimina |
+| Ganadores | Lee | Lee | Lee, crea, edita y elimina |
 | Boletos | Sin SELECT ni escritura directa | Sin filas visibles ni edición | Lee todos y revisa estados |
 | Admins | Sin acceso | Consulta únicamente su propia pertenencia | Consulta únicamente su propia pertenencia |
 | Banners | Lee | Lee | Lee, sube, reemplaza y elimina |
@@ -100,11 +122,16 @@ es `SECURITY DEFINER`, con búsqueda vacía y sin EXECUTE para clientes, porque 
 admin no puede escribir directamente el contador. Los borrados de sorteos con
 boletos y las referencias históricas quedan protegidos por las claves foráneas.
 
-Se conserva la lectura pública de todos los premios y del historial de ganadores
-indicada por la arquitectura. `ganadores.boleto_id` no concede acceso al boleto
+La lectura pública de premios exige que su sorteo esté activo, para proteger los
+borradores y sus valores referenciales. El admin conserva acceso a los premios de
+sorteos inactivos. El historial de ganadores sigue siendo público.
+`ganadores.boleto_id` no concede acceso al boleto
 relacionado: las consultas anidadas siguen sujetas a los permisos y RLS de boletos.
-El bucket `comprobantes-pago` es privado y no recibe políticas de navegador;
-su acceso futuro corresponde a una Edge Function con credenciales de servicio.
+Los buckets se crean con `on conflict (id) do nothing`: si ya existen se conserva
+su configuración y la migración puede completar las políticas. Al crearlos,
+`sorteos-banners` es público y `comprobantes-pago` es privado. Este último no recibe
+políticas de navegador; su acceso futuro corresponde a una Edge Function con
+credenciales de servicio. Andy debe verificar esos modos si los buckets ya existían.
 
 ## Decisión pendiente para Andy: TicketLookupPage
 
@@ -134,8 +161,13 @@ migración posterior. No se implementan tokens ni OTP hasta que Andy elija el fl
 Esta entrega se verifica estáticamente, sin aplicar migraciones ni seed, ni
 conectarse al proyecto remoto. Después de aplicarlas en una base de desarrollo:
 
-- Comprobar 4 comprados → 1 gratis, total 5 y monto 20000 COP con precio 5000;
-  rechazar nulos, negativos, cero, texto vacío, documento inválido y desbordamientos.
+- Comprobar `calcular_monto_total(0, 5000)` → `0/0/0/0` y 4 comprados → 1 gratis,
+  total 5 y monto 20000 COP. Rechazar compras con cero, nulos, negativos, texto vacío,
+  documento inválido y desbordamientos; el cálculo tampoco admite precio inválido.
+- Con cupo suficiente y tope 50, comprar 50 debe reservar 62 y comprar 51 debe
+  devolver `P1001` sin mutaciones. Ajustar el tope como admin y repetir; una compra
+  dentro del tope pero sin cupo debe devolver `P0001`. Probar cambios concurrentes
+  del tope y rechazar límites nulos/no positivos y números de edición duplicados.
 - Comprar con anon; confirmar que devuelve solo el boleto recién creado y que
   los SELECT directos a boletos y admins están denegados. Una sesión sin admin
   no debe leer boletos, revisar pagos, editar sorteos ni ascenderse a admin.
@@ -148,6 +180,9 @@ conectarse al proyecto remoto. Después de aplicarlas en una base de desarrollo:
   reservas anónimas no borran la autoría de configuración de sorteos.
 - Verificar CRUD administrativo, auditoría con dos admins distintos y permisos de
   Storage: banners legibles públicamente, escritura solo admin y comprobantes cerrados.
+- Confirmar que anon y usuarios sin admin no leen premios de sorteos inactivos,
+  mientras que el admin sí. Aplicar la tercera migración con ninguno, uno o ambos
+  buckets preexistentes y confirmar que se crean las políticas sin alterar esos buckets.
 - Ejecutar el seed solo en desarrollo y comprobar el sorteo activo, sus cuatro
   premios y los valores 5000; repetirlo y comprobar que no duplica registros.
 

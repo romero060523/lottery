@@ -8,7 +8,7 @@ create table public.admins (
 
 create table public.sorteos (
   id uuid primary key default gen_random_uuid(),
-  edicion_numero integer not null check (edicion_numero > 0),
+  edicion_numero integer not null unique check (edicion_numero > 0),
   nombre text not null check (char_length(btrim(nombre)) > 0),
   subtitulo text,
   descripcion text,
@@ -16,6 +16,7 @@ create table public.sorteos (
   color_hex text,
   precio_boleto integer not null check (precio_boleto > 0),
   tickets_totales integer not null check (tickets_totales > 0),
+  max_tickets_por_compra integer not null default 50 check (max_tickets_por_compra > 0),
   tickets_vendidos integer not null default 0,
   codigo_prefijo text not null default 'PD' check (char_length(btrim(codigo_prefijo)) between 1 and 20),
   fecha_inicio_ventas timestamptz not null default now(),

@@ -8,11 +8,13 @@ grant select on public.admins, public.boletos to authenticated;
 -- El contador y la auditoría se administran en el servidor, no desde el formulario.
 grant insert (
   id, edicion_numero, nombre, subtitulo, descripcion, banner_url, color_hex,
-  precio_boleto, tickets_totales, codigo_prefijo, fecha_inicio_ventas, fecha_fin_ventas, activo
+  precio_boleto, tickets_totales, max_tickets_por_compra, codigo_prefijo,
+  fecha_inicio_ventas, fecha_fin_ventas, activo
 ) on public.sorteos to authenticated;
 grant update (
   edicion_numero, nombre, subtitulo, descripcion, banner_url, color_hex,
-  precio_boleto, tickets_totales, codigo_prefijo, fecha_inicio_ventas, fecha_fin_ventas, activo
+  precio_boleto, tickets_totales, max_tickets_por_compra, codigo_prefijo,
+  fecha_inicio_ventas, fecha_fin_ventas, activo
 ) on public.sorteos to authenticated;
 grant delete on public.sorteos to authenticated;
 grant insert, update, delete on public.sorteo_premios, public.ganadores to authenticated;
@@ -46,7 +48,10 @@ create policy sorteos_admin_all on public.sorteos
 
 create policy premios_select_publico on public.sorteo_premios
   for select to anon, authenticated
-  using (true);
+  using (exists (
+    select 1 from public.sorteos
+    where sorteos.id = sorteo_premios.sorteo_id and sorteos.activo = true
+  ));
 
 create policy premios_admin_all on public.sorteo_premios
   for all to authenticated
@@ -75,7 +80,8 @@ create policy ganadores_admin_all on public.ganadores
 
 insert into storage.buckets (id, name, public) values
   ('sorteos-banners', 'sorteos-banners', true),
-  ('comprobantes-pago', 'comprobantes-pago', false);
+  ('comprobantes-pago', 'comprobantes-pago', false)
+on conflict (id) do nothing;
 
 create policy banners_select_publico on storage.objects
   for select to anon, authenticated

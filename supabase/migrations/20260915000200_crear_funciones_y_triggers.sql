@@ -28,12 +28,16 @@ declare
   v_total bigint;
   v_monto bigint;
 begin
-  v_gratis := public.calcular_tickets_gratis(p_cantidad);
-
   if p_precio_boleto is null or p_precio_boleto <= 0 then
     raise exception 'El precio del boleto debe ser un entero positivo en COP' using errcode = '22023';
   end if;
 
+  if p_cantidad = 0 then
+    return query select 0, 0, 0, 0;
+    return;
+  end if;
+
+  v_gratis := public.calcular_tickets_gratis(p_cantidad);
   v_total := p_cantidad::bigint + v_gratis;
   v_monto := p_cantidad::bigint * p_precio_boleto;
 
@@ -111,7 +115,8 @@ create trigger trg_auditoria_sorteo_premios
 -- SECURITY DEFINER permite comprar con anon sin conceder escritura directa ni
 -- lectura de boletos. Antes de escribir valida identidad de contacto no vacía y
 -- acotada, tipo de documento, cantidad positiva, rango de enteros, sorteo activo,
--- fechas de venta y cupo (incluidos los gratis). No verifica la identidad personal.
+-- fechas de venta, tope de compra y cupo (incluidos los gratis).
+-- No verifica la identidad personal.
 -- El precio proviene de sorteos; el cliente no elige precio, código ni estado.
 -- Solo devuelve el boleto recién insertado. No hay SQL dinámico; search_path está
 -- vacío y las relaciones están calificadas. EXECUTE se concede explícitamente.
@@ -132,6 +137,7 @@ declare
   v_precio integer;
   v_gratis integer;
   v_incremento bigint;
+  v_max_tickets_por_compra integer;
   v_boleto public.boletos;
 begin
   v_gratis := public.calcular_tickets_gratis(p_cantidad);
@@ -155,11 +161,24 @@ begin
     and activo = true
     and fecha_inicio_ventas <= now()
     and (fecha_fin_ventas is null or fecha_fin_ventas > now())
+    and p_cantidad <= max_tickets_por_compra
     and v_incremento <= tickets_totales - tickets_vendidos
     and p_cantidad::bigint * precio_boleto <= 2147483647
   returning precio_boleto into v_precio;
 
   if not found then
+    select max_tickets_por_compra into v_max_tickets_por_compra
+    from public.sorteos
+    where id = p_sorteo_id
+      and activo = true
+      and fecha_inicio_ventas <= now()
+      and (fecha_fin_ventas is null or fecha_fin_ventas > now());
+
+    if p_cantidad > v_max_tickets_por_compra then
+      raise exception 'La cantidad comprada supera el máximo de % tickets por compra', v_max_tickets_por_compra
+        using errcode = 'P1001';
+    end if;
+
     raise exception 'No hay cupo, la venta no está habilitada o el monto excede el límite admitido';
   end if;
 
