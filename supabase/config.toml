@@ -39,6 +39,9 @@ health_timeout = "2m"
 # The database major version to use. This has to be the same as your remote database's. Run `SHOW
 # server_version;` on the remote database to check.
 major_version = 17
+# CLI 2.117.0 no admite una lista db.extensions/db.enabled_extensions.
+# Usar pnpm run db:reset:local: recrea la base inicial, habilita pg_cron como
+# supabase_admin local y completa migraciones + seed. Ver supabase/README.md.
 
 [db.pooler]
 enabled = false

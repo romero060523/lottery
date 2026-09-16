@@ -1,7 +1,8 @@
 # Esquema inicial de Supabase
 
-Implementa las secciones 2 y 6 de `docs/arquitectura.md`. Andy aplica y verifica
-las migraciones; esta entrega no ejecuta SQL contra ninguna base de datos.
+Implementa las secciones 2 y 6 de `docs/arquitectura.md`. Andy aplica las
+migraciones en el proyecto; la validación de esta entrega usa una instancia
+local desechable, independiente de la base habitual y de la remota.
 Se presupone un proyecto Supabase con `auth`, `storage` y los roles `anon`,
 `authenticated` y `service_role`. Las migraciones deben pertenecer al rol
 administrativo de migraciones, que puede acceder a las tablas sin RLS.
@@ -19,7 +20,9 @@ administrativo de migraciones, que puede acceder a las tablas sin RLS.
 5. `migrations/20260916000200_programar_caducidad_pendientes.sql`: validación de
    `pg_cron` ya habilitado y programación cada cinco minutos.
 
-`seeds/desarrollo.sql` está fuera de `migrations/` y no se ejecuta automáticamente.
+`seeds/desarrollo.sql` está fuera de `migrations/`. `[db.seed]` lo carga al terminar
+un `db reset` que haya aplicado correctamente todas las migraciones; `db push`
+no lo incluye por defecto.
 Es exclusivamente para desarrollo: crea un sorteo activo con precio de **5000 COP**,
 capacidad de **5000 tickets** y cuatro premios (uno mayor y tres secundarios).
 El tope por compra usa el valor predeterminado de **50 tickets comprados**.
@@ -80,7 +83,7 @@ solamente en el formulario podría eludirse.
 
 ## Caducidad de pendientes
 
-### Requisito manual: habilitar Cron
+### Producción: habilitar Cron en Dashboard
 
 Antes de aplicar cualquiera de las dos migraciones de caducidad, Andy debe abrir
 **Dashboard > Integrations > Cron** en el proyecto y habilitar `pg_cron`. La
@@ -93,10 +96,56 @@ La primera migración comprueba la extensión y los permisos de uso/planificaci�
 **antes de alterar tablas**; la segunda repite la comprobación antes de crear el
 job. Si falta la extensión, fallan con SQLSTATE `55000` e instrucciones para
 habilitarla; si faltan permisos, con `42501`. No se omite silenciosamente el job.
-Una vez habilitada, Andy reintenta las migraciones. En desarrollo local debe
-preparar la extensión mediante Studio o un administrador del Postgres local,
-fuera de estas migraciones, y comprobar el requisito después de reconstruir la
-base. Un `db reset`/`db push` sin ese requisito se detiene con el mismo mensaje.
+Una vez habilitada, Andy reintenta las migraciones pendientes, sin recrear la base.
+
+### Desarrollo local: un comando de reset con Cron
+
+`pnpm-lock.yaml` y el binario instalado fijan **2.117.0**. Esa versión no tiene
+`db.extensions`, `db.enabled_extensions` ni una lista equivalente en `[db]`:
+se comprobaron el [esquema de configuración](https://github.com/supabase/cli/blob/v2.117.0/packages/config/src/db.ts),
+el [lector de configuración](https://github.com/supabase/cli/blob/v2.117.0/apps/cli/src/command-internal/legacy-db-config.toml-read.ts)
+y el [bootstrap de la base](https://github.com/supabase/cli/blob/v2.117.0/apps/cli/src/command-internal/db-bootstrap/db-setup.ts).
+No se añade una clave que el CLI no consume.
+
+Instalar `pg_cron` y repetir `db reset` **no funciona**: el reset elimina esa
+instalación antes de aplicar las migraciones. `roles.sql` se ejecuta antes de
+migrar, pero con `postgres`; tampoco puede instalar esta extensión no trusted.
+El rol local `postgres` no es superusuario ni miembro de `supabase_admin`.
+
+Con Docker corriendo y las dependencias instaladas, ejecutar:
+
+```bash
+pnpm run db:reset:local
+```
+
+**Borra los datos de la base local** identificada por `project_id`. El script
+`scripts/reset-local.mjs` funciona también sin contenedor previo y detiene la
+secuencia ante cualquier error:
+
+1. `supabase db start` inicia Postgres y los esquemas de Auth/Storage, omitiendo
+   migraciones y seed solo en esa invocación mediante variables de entorno.
+2. `supabase db reset --local --version 20260915000300 --no-seed` recrea la base
+   y aplica las tres migraciones iniciales, independientes de Cron.
+3. `docker exec ... psql -U supabase_admin` habilita `pg_cron` en la base ya
+   recreada y concede al rol `postgres` uso del esquema y del planificador.
+   No convierte a `postgres` en superusuario ni amplía privilegios de la API.
+4. `supabase db push --local --include-seed` aplica las migraciones restantes
+   y carga los archivos de `[db.seed].sql_paths`.
+
+Se eligió este orden porque conserva intactas las comprobaciones de producción,
+usa el historial del CLI para continuar y no duplica los SQL del seed. La frontera
+`20260915000300` es la última migración histórica sin Cron; si se introduce una
+dependencia anterior, hay que revisar esa frontera. No se requiere instalar Cron
+a mano entre comandos ni cambiar temporalmente los archivos de migración.
+
+El rodeo es **exclusivo de local**: todos los comandos que aplican migraciones
+llevan `--local`, no se aceptan `--linked`, `--db-url` ni referencias remotas.
+Para pruebas puede pasarse `--workdir <directorio-local>` con otro `project_id`
+y puertos. El script inicia solo Postgres; `pnpm supabase start` levanta después
+el resto de servicios si se necesitan para desarrollar la aplicación.
+En producción se habilita Cron una sola vez desde el Dashboard antes del primer
+`db push`; este script no se usa allí. Un `pnpm supabase db reset` directo sigue
+sin cubrir el bootstrap de Cron en 2.117.0: usar el comando del proyecto.
 
 ### Plazo desde cada entrada a pendiente
 
@@ -156,6 +205,42 @@ los errores ordinarios de fila y la contención de sorteos se aíslan. Los error
 capturados se consultan en `incidencias_caducidad`; el job puede figurar como
 exitoso en `cron.job_run_details` habiendo procesado otros boletos sanos.
 
+### Consulta admin de cuarentenas y resolución de incidencias
+
+`public.ediciones_en_cuarentena` entrega una fila por edición con incidencias
+abiertas de contador (`P1003`) o contención (`55P03`). Expone `sorteo_id`,
+`edicion_numero`, `nombre`, `cuarentena_desde`, `ultimo_fallo_en`,
+`reintentar_desde` y `motivos` (JSON con boleto, código, mensaje, inicio e intentos).
+`primera_incidencia_en` conserva el primer fallo de la misma causa en los
+reintentos; `registrado_en` registra el último. Si cambia el código, comienza
+un nuevo intervalo para esa causa. Una fecha de reintento vencida significa que
+el job puede volver a intentarlo, no que la incidencia esté resuelta: sigue visible.
+
+```sql
+select * from public.ediciones_en_cuarentena order by cuarentena_desde;
+```
+
+La vista usa `security_invoker = true` y los permisos/RLS de sus tablas: un
+admin autenticado ve también ediciones inactivas; una sesión sin admin obtiene
+cero filas y `anon` carece de SELECT. No expone datos personales ni concede
+escritura. La UI y sus alertas quedan para el panel; consultar solo el resultado
+del cron o el número de caducados no basta para detectar una cuarentena.
+
+Al guardar `validado` o `rechazado`, un trigger elimina la incidencia de ese
+boleto dentro de la misma transacción, también en la revisión manual o del
+servicio. Un error o ROLLBACK restaura tanto estado como incidencia. El admin
+no recibe DELETE ni una RPC privilegiada para saltarse una cuarentena pendiente.
+El job limpia incidencias de boletos ya revisados o inexistentes, saltando las
+incidencias bloqueadas; además, tanto la selección de ediciones como la vista
+ignoran registros cuyo boleto ya no esté pendiente. Esto cubre una incidencia
+registrada después de una validación concurrente.
+
+Resolver la incidencia de un boleto **no concilia el contador**: si la edición
+sigue inconsistente, la siguiente reserva vencida vuelve a producir `P1003`, sin
+esperar el aplazamiento del boleto validado. Las incidencias de otras reservas
+pendientes permanecen. La tabla representa incidencias abiertas, no un historial
+permanente de resoluciones; la auditoría de la revisión queda en `boletos`.
+
 El nombre estable del job permite reprogramarlo con `cron.schedule` para el mismo
 propietario: su [implementación](https://github.com/citusdata/pg_cron/blob/v1.6.5/src/job_metadata.c#L229-L237)
 actualiza horario y comando ante conflicto de nombre/usuario.
@@ -206,8 +291,19 @@ sola al boleto sin reserva. Sin procedencia histórica no puede determinarse cu�
 reserva es legítima: esa edición requiere conciliación manual. El job no resta
 cupos de ella ni modifica automáticamente su contador. Esto protege también el
 caso de un boleto sin reserva cuyo importe en tickets cabe en el contador ajeno.
-La suma se ejecuta en el job, una vez por sorteo comprobado, y no agrega trabajo
-a cada compra. Tras un fallo de fila se vuelve a comprobar antes de continuar.
+El job hace una comprobación inicial por sorteo y la repite tras un fallo de fila.
+Además, `liberar_tickets_rechazados` aplica la misma guarda **en cada rechazo**,
+manual, de servicio o de caducidad, con el contador bloqueado. Un desajuste lanza
+`P1003` y revierte estado, auditoría y liberación: que la cantidad quepa en el
+contador no demuestra que ese boleto haya reservado cupo.
+
+El liberador pasa a `BEFORE UPDATE OF estado`: la suma todavía incluye el boleto
+actual, y las filas previas de un UPDATE múltiple ya reflejan su liberación. Un
+trigger AFTER por fila vería todos los estados nuevos antes de haber restado todos
+los cupos y daría falsos desajustes. Esta [visibilidad de triggers](https://www.postgresql.org/docs/17/trigger-datachanges.html)
+permite rechazar varias reservas sanas en una sentencia y conservar la atomicidad.
+La suma por rechazo agrega costo también al job; no se agrega ninguna suma a
+`comprar_tickets` ni se modifica su camino de reserva.
 
 Tras esa comprobación, la tarea cambia `pendiente` a `rechazado` y asigna su identificador de sistema.
 **No modifica `tickets_vendidos`, no llama directamente al liberador ni desactiva
@@ -247,10 +343,38 @@ tocan varias filas. Evitar tomar primero el sorteo y luego un boleto: invierte
 el orden del job y de la liberación. Este PR no incorpora el RPC de revisión
 ni resuelve el protocolo de locks/reintentos del futuro panel; M3 sigue abierto.
 
-### Comprobaciones de caducidad para Andy
+**Límites transitorios sin cambios:** se conserva `statement_timeout = '2min'`
+en el comando del cron. Una cancelación global revierte toda la corrida; no se
+resuelve aquí el caso de livelock ni se garantiza progreso de ese lote. También
+se conserva el presupuesto de **1000 intentos por corrida**, sin rediseñar el
+reparto entre ediciones. **M4 queda fuera de alcance y va en otra rama.**
 
-No se aplicaron estas migraciones ni se ejecutó el job durante su preparación.
-Después de aplicarlas en desarrollo con el rol administrativo:
+### Validación ejecutada y comprobaciones adicionales
+
+Segunda revisión ejecutada en un contenedor desechable con otro `project_id` y
+puertos, usando CLI **2.117.0** y la imagen Supabase Postgres **17.6.1.167**:
+
+- Dos ejecuciones consecutivas de `pnpm run db:reset:local --workdir <pruebas>`
+  terminaron sin errores; la primera inició sin contenedor previo y ambas
+  recrearon la base desde cero. Tras cada una: cinco migraciones, un sorteo de
+  seed con cuatro premios y un único job `caducar-boletos-pendientes`.
+- **34 pruebas pgTAP: PASS.** Se ejecutaron con `pnpm supabase test db --workdir
+  <pruebas>` sobre la segunda base reconstruida.
+- Ambas guardas se ejecutaron sin `pg_cron` dentro de transacciones descartables:
+  devolvieron `55000` con mensaje e instrucciones antes de cualquier DDL/job.
+- `node --check`, oxlint del script y `git diff --check` pasaron.
+
+La base local habitual y el proyecto remoto no recibieron migraciones ni cambios.
+
+`tests/caducidad_regresion.sql` prepara fixtures dentro de una transacción y
+termina con ROLLBACK. Se ejecuta con
+`pnpm supabase test db supabase/tests/caducidad_regresion.sql`. Cubre el huérfano
+de 10 tickets en rechazo manual, rechazo desde validado, UPDATE múltiple sano,
+idempotencia, cron con edición sana/inconsistente, RLS de la vista, antigüedad
+del fallo, validación con rollback, incidencias tardías y rechazo tras conciliación.
+La incidencia tardía se prueba mediante una intercalación simulada; no sustituye
+las comprobaciones con dos sesiones que siguen a continuación. Para ampliar la
+revisión operativa después de aplicar en desarrollo:
 
 - Probar pg_cron ausente: error `55000` antes del primer ALTER de caducidad y antes
   de programar; con pg_cron habilitado y permisos, no debe intentarse instalarlo.

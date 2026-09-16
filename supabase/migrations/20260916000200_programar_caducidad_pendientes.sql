@@ -3,8 +3,8 @@ begin;
 do $$
 begin
   if not exists (select 1 from pg_catalog.pg_extension where extname = 'pg_cron') then
-    raise exception 'Falta pg_cron: habilítalo en Dashboard > Integrations > Cron antes de programar la caducidad'
-      using errcode = '55000', hint = 'Consulta supabase/README.md. No se creó ni modificó el job.';
+    raise exception 'Falta pg_cron: habilítalo antes de programar la caducidad'
+      using errcode = '55000', hint = 'Producción: Dashboard > Integrations > Cron. Desarrollo local: consulta supabase/README.md. No se creó ni modificó el job.';
   end if;
 
   if not has_schema_privilege(current_user, 'cron', 'USAGE')

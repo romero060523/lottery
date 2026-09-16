@@ -4,8 +4,8 @@ begin;
 do $$
 begin
   if not exists (select 1 from pg_catalog.pg_extension where extname = 'pg_cron') then
-    raise exception 'Falta pg_cron: habilítalo en Dashboard > Integrations > Cron antes de aplicar las migraciones de caducidad'
-      using errcode = '55000', hint = 'La migración no instala extensiones. Consulta supabase/README.md y vuelve a ejecutarla después de habilitar Cron.';
+    raise exception 'Falta pg_cron: habilítalo antes de aplicar las migraciones de caducidad'
+      using errcode = '55000', hint = 'Producción: Dashboard > Integrations > Cron. Desarrollo local: consulta supabase/README.md; instalar antes de db reset no basta porque recrea la base.';
   end if;
 
   if not has_schema_privilege(current_user, 'cron', 'USAGE')
@@ -70,6 +70,7 @@ create table public.incidencias_caducidad (
   codigo_error text not null,
   mensaje text not null,
   intentos integer not null default 1,
+  primera_incidencia_en timestamptz not null,
   registrado_en timestamptz not null,
   reintentar_desde timestamptz not null
 );
@@ -81,6 +82,96 @@ grant select on public.incidencias_caducidad to authenticated;
 create policy incidencias_caducidad_select_admin on public.incidencias_caducidad
   for select to authenticated
   using (exists (select 1 from public.admins where user_id = (select auth.uid())));
+
+-- Una fila por edición apartada por el job. El reintento vencido no implica que
+-- la causa esté resuelta: sigue visible hasta resolverla o procesar el boleto.
+-- SECURITY INVOKER conserva la RLS de incidencias, boletos y sorteos.
+create view public.ediciones_en_cuarentena
+with (security_invoker = true) as
+select s.id as sorteo_id, s.edicion_numero, s.nombre,
+  min(i.primera_incidencia_en) as cuarentena_desde,
+  max(i.registrado_en) as ultimo_fallo_en,
+  max(i.reintentar_desde) as reintentar_desde,
+  jsonb_agg(jsonb_build_object(
+    'boleto_id', i.boleto_id,
+    'codigo_error', i.codigo_error,
+    'mensaje', i.mensaje,
+    'desde', i.primera_incidencia_en,
+    'intentos', i.intentos
+  ) order by i.primera_incidencia_en, i.boleto_id) as motivos
+from public.incidencias_caducidad i
+join public.boletos b on b.id = i.boleto_id and b.sorteo_id = i.sorteo_id
+join public.sorteos s on s.id = i.sorteo_id
+where b.estado = 'pendiente' and i.codigo_error in ('55P03', 'P1003')
+group by s.id, s.edicion_numero, s.nombre;
+
+revoke all on public.ediciones_en_cuarentena from public, anon, authenticated, service_role;
+grant select on public.ediciones_en_cuarentena to authenticated;
+
+-- Comprobar y liberar ANTES de cambiar la fila conserva la misma invariante
+-- también en UPDATE de varios boletos: las filas anteriores ya liberaron cupo
+-- y esta todavía participa en la suma. Un AFTER ROW vería todos los rechazos
+-- de la sentencia antes de haber descontado sus reservas.
+create or replace function public.liberar_tickets_rechazados()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_contador integer;
+  v_reservas bigint;
+begin
+  if new.estado = 'rechazado' and old.estado <> 'rechazado' then
+    select tickets_vendidos into v_contador
+    from public.sorteos where id = old.sorteo_id
+    for no key update;
+
+    select coalesce(sum(cantidad_total), 0) into v_reservas
+    from public.boletos
+    where sorteo_id = old.sorteo_id and estado <> 'rechazado';
+
+    if v_contador is distinct from v_reservas then
+      raise exception 'El contador del sorteo no coincide con sus boletos reservados; requiere conciliación'
+        using errcode = 'P1003';
+    end if;
+
+    update public.sorteos
+    set tickets_vendidos = tickets_vendidos - old.cantidad_total
+    where id = old.sorteo_id and tickets_vendidos >= old.cantidad_total;
+
+    if not found then
+      raise exception 'El contador del sorteo no permite liberar los tickets reservados';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger trg_liberar_tickets_rechazados on public.boletos;
+create trigger trg_liberar_tickets_rechazados
+  before update of estado on public.boletos
+  for each row execute function public.liberar_tickets_rechazados();
+
+-- Validar o rechazar resuelve la incidencia del boleto en la misma transacción.
+-- El admin no recibe DELETE directo sobre incidencias ni puede borrar una
+-- cuarentena cuyo boleto continúe pendiente.
+create function public.resolver_incidencia_caducidad()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  delete from public.incidencias_caducidad where boleto_id = new.id;
+  return new;
+end;
+$$;
+
+create trigger trg_resolver_incidencia_caducidad
+  after update of estado on public.boletos
+  for each row when (new.estado <> 'pendiente')
+  execute function public.resolver_incidencia_caducidad();
 
 create or replace function public.registrar_revision_boleto()
 returns trigger
@@ -202,6 +293,19 @@ begin
     return 0;
   end if;
 
+  -- Sin FK pueden existir incidencias de boletos eliminados por mantenimiento,
+  -- o registradas después de una validación concurrente al liberar el subbloque.
+  with resueltas as (
+    select i.boleto_id from public.incidencias_caducidad i
+    where not exists (
+      select 1 from public.boletos b
+      where b.id = i.boleto_id and b.sorteo_id = i.sorteo_id and b.estado = 'pendiente'
+    )
+    for update of i skip locked
+  )
+  delete from public.incidencias_caducidad i
+  using resueltas where i.boleto_id = resueltas.boleto_id;
+
   for v_sorteo in
     select sorteos.id, sorteos.ttl_pendientes_horas
     from public.sorteos
@@ -211,9 +315,10 @@ begin
         and boletos.pendiente_desde < v_instante - make_interval(hours => sorteos.ttl_pendientes_horas)
     )
       and not exists (
-        select 1 from public.incidencias_caducidad
-        where sorteo_id = sorteos.id and reintentar_desde > v_instante
-          and codigo_error in ('55P03', 'P1003')
+        select 1 from public.incidencias_caducidad i
+        join public.boletos b on b.id = i.boleto_id and b.sorteo_id = i.sorteo_id
+        where i.sorteo_id = sorteos.id and i.reintentar_desde > v_instante
+          and i.codigo_error in ('55P03', 'P1003') and b.estado = 'pendiente'
       )
     order by sorteos.id
   loop
@@ -274,7 +379,6 @@ begin
         set estado = 'rechazado', validado_por = 'sistema:caducidad'
         where id = v_candidato.id and estado = 'pendiente';
 
-        delete from public.incidencias_caducidad where boleto_id = v_candidato.id;
         v_caducados := v_caducados + 1;
       exception when others then
         get stacked diagnostics v_codigo_error = returned_sqlstate, v_mensaje = message_text;
@@ -282,11 +386,17 @@ begin
         v_comprobado := false;
 
         insert into public.incidencias_caducidad (
-          boleto_id, sorteo_id, codigo_error, mensaje, registrado_en, reintentar_desde
+          boleto_id, sorteo_id, codigo_error, mensaje, primera_incidencia_en,
+          registrado_en, reintentar_desde
         ) values (
-          v_candidato.id, v_sorteo.id, v_codigo_error, v_mensaje, v_instante,
+          v_candidato.id, v_sorteo.id, v_codigo_error, v_mensaje, v_instante, v_instante,
           v_instante + case when v_codigo_error = '55P03' then interval '10 minutes' else interval '1 hour' end
         ) on conflict (boleto_id) do update set
+          primera_incidencia_en = case
+            when public.incidencias_caducidad.codigo_error = excluded.codigo_error
+              then public.incidencias_caducidad.primera_incidencia_en
+            else excluded.primera_incidencia_en
+          end,
           codigo_error = excluded.codigo_error,
           mensaje = excluded.mensaje,
           registrado_en = excluded.registrado_en,
@@ -304,7 +414,8 @@ begin
 end;
 $$;
 
-revoke all on function public.registrar_revision_boleto(), public.caducar_boletos_pendientes()
+revoke all on function public.registrar_revision_boleto(), public.caducar_boletos_pendientes(),
+  public.liberar_tickets_rechazados(), public.resolver_incidencia_caducidad()
   from public, anon, authenticated, service_role;
 
 commit;
