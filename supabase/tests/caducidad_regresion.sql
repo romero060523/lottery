@@ -4,6 +4,13 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions, pg_temp;
 select no_plan();
+-- Aísla el job de datos previos de la base (pendientes vencidos de desarrollo)
+-- y de una corrida concurrente de cron: el lock advisory es reentrante en esta
+-- sesión, así que las llamadas de la prueba lo obtienen y cron devuelve 0.
+select pg_advisory_xact_lock(hashtextextended('public.caducar_boletos_pendientes', 0));
+alter table public.boletos disable trigger trg_registrar_revision_boleto;
+update public.boletos set pendiente_desde = statement_timestamp() where estado = 'pendiente';
+alter table public.boletos enable trigger trg_registrar_revision_boleto;
 
 insert into auth.users (id) values ('91000000-0000-4000-8000-000000000001');
 insert into public.admins (user_id, nombre)
