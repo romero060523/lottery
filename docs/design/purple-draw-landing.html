@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  html { scroll-behavior: smooth; }
+  body { margin: 0; background: #E9E8E6; color: #2A2A2A; font-family: Inter, system-ui, sans-serif; overflow-x: hidden; }
+  * { box-sizing: border-box; }
+  a { color: #7B4AE2; text-decoration: none; }
+  a:hover { color: #E8604C; }
+  @keyframes pdPulse { 0%,100% { opacity: 1 } 50% { opacity: .25 } }
+</style>
+</helmet>
+
+<div data-grain="1" style="position:fixed;inset:0;z-index:9000;pointer-events:none;opacity:.5;mix-blend-mode:multiply;background-image:url('data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22180%22 height=%22180%22><filter id=%22n%22><feTurbulence type=%22fractalNoise%22 baseFrequency=%220.9%22 numOctaves=%224%22 stitchTiles=%22stitch%22/></filter><rect width=%22180%22 height=%22180%22 filter=%22url(%23n)%22 opacity=%220.42%22/></svg>')"></div>
+
+<div data-cursor="1" style="position:fixed;top:0;left:0;width:10px;height:10px;border-radius:50%;background:#7B4AE2;z-index:9500;pointer-events:none;transform:translate(-100px,-100px);transition:background-color .4s ease, width .25s ease, height .25s ease;display:none"></div>
+
+<header style="position:fixed;top:0;left:0;right:0;z-index:8000;display:flex;align-items:center;justify-content:space-between;padding:16px clamp(16px,4vw,48px);mix-blend-mode:normal">
+  <div style="display:flex;align-items:center;gap:10px">
+    <div style="width:34px;height:34px;border-radius:50%;background:#7B4AE2;border:1px solid #2A2A2A;display:flex;align-items:center;justify-content:center;font-family:Anton,sans-serif;font-size:15px;color:#E9E8E6;letter-spacing:.02em">P</div>
+    <span data-header-word="1" style="font:600 10px/1 Inter;letter-spacing:.22em;text-transform:uppercase;color:#2A2A2A;transition:color .35s ease">Purple Draw</span>
+  </div>
+  <button data-header-burger="1" onClick="{{ toggleMenu }}" aria-label="Abrir menú" style="width:46px;height:46px;border-radius:50%;border:1px solid #2A2A2A;background:#E9E8E6;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;cursor:pointer;transition:background-color .35s ease,border-color .35s ease" style-hover="background:#2A2A2A">
+    <span style="display:block;width:18px;height:1.5px;background:#2A2A2A"></span>
+    <span style="display:block;width:18px;height:1.5px;background:#2A2A2A"></span>
+  </button>
+</header>
+
+<sc-if value="{{ menuOpen }}">
+  <nav style="position:fixed;inset:0;z-index:9200;background:#7B4AE2;padding:clamp(20px,5vw,56px);display:flex;flex-direction:column;justify-content:space-between">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start">
+      <span style="font:600 10px/1 Inter;letter-spacing:.22em;text-transform:uppercase;color:#E9E8E6">Navegación · Purple Draw</span>
+      <button onClick="{{ toggleMenu }}" aria-label="Cerrar menú" style="font:600 11px/1 Inter;letter-spacing:.18em;text-transform:uppercase;color:#E9E8E6;background:none;border:1px solid rgba(233,232,230,.55);border-radius:999px;padding:12px 20px;cursor:pointer" style-hover="background:#2A2A2A;border-color:#2A2A2A">Cerrar ✕</button>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:clamp(2px,1vw,10px);padding:24px 0">
+      <a href="#premios" onClick="{{ toggleMenu }}" style="font-family:Anton,sans-serif;font-size:clamp(44px,11vw,132px);line-height:.92;letter-spacing:-.02em;text-transform:uppercase;color:#E9E8E6" style-hover="color:#2A2A2A">Premios</a>
+      <a href="#mecanica" onClick="{{ toggleMenu }}" style="font-family:Anton,sans-serif;font-size:clamp(44px,11vw,132px);line-height:.92;letter-spacing:-.02em;text-transform:uppercase;color:#E9E8E6" style-hover="color:#2A2A2A">Cómo participar</a>
+      <a href="#tickets" onClick="{{ toggleMenu }}" style="font-family:Anton,sans-serif;font-size:clamp(44px,11vw,132px);line-height:.92;letter-spacing:-.02em;text-transform:uppercase;color:#E9E8E6" style-hover="color:#2A2A2A">Tickets</a>
+      <a href="#ganadores" onClick="{{ toggleMenu }}" style="font-family:Anton,sans-serif;font-size:clamp(44px,11vw,132px);line-height:.92;letter-spacing:-.02em;text-transform:uppercase;color:#E9E8E6" style-hover="color:#2A2A2A">Ganadores</a>
+    </div>
+    <span style="font:400 12px/1.5 Inter;color:rgba(233,232,230,.75);max-width:520px">Plataforma fan no oficial. Sin afiliación con HYBE, BIGHIT MUSIC o BTS.</span>
+  </nav>
+</sc-if>
+
+<main data-cursor-color="#7B4AE2" style="position:relative;z-index:10">
+
+  <section data-sec="1" data-cursor-color="#7B4AE2" style="position:relative;min-height:100vh;padding:clamp(96px,14vh,160px) clamp(16px,4vw,48px) clamp(48px,7vh,90px);display:flex;flex-direction:column;justify-content:center;overflow:hidden">
+    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:clamp(18px,3vh,34px)">
+      <span data-reveal="text" style="opacity:0;transform:translateY(24px);transition:opacity .7s ease,transform .7s cubic-bezier(.2,.8,.2,1);display:inline-flex;align-items:center;gap:7px;background:#F2C230;border:1px solid #2A2A2A;border-radius:999px;padding:8px 15px;font:600 10px/1 Inter;letter-spacing:.16em;text-transform:uppercase;color:#2A2A2A;cursor:default" style-hover="background:#2A2A2A;color:#F2C230"><span style="width:6px;height:6px;border-radius:50%;background:#2A2A2A;animation:pdPulse 1.6s infinite"></span>Sorteo activo</span>
+      <span data-reveal="text" style="opacity:0;transform:translateY(24px);transition:opacity .7s ease .06s,transform .7s cubic-bezier(.2,.8,.2,1) .06s;background:#3B82F6;border:1px solid #2A2A2A;border-radius:999px;padding:8px 15px;font:600 10px/1 Inter;letter-spacing:.16em;text-transform:uppercase;color:#E9E8E6;cursor:default" style-hover="background:#2A2A2A">Tickets a $5.000 COP</span>
+      <span data-reveal="text" style="opacity:0;transform:translateY(24px);transition:opacity .7s ease .12s,transform .7s cubic-bezier(.2,.8,.2,1) .12s;background:#7B4AE2;border:1px solid #2A2A2A;border-radius:999px;padding:8px 15px;font:600 10px/1 Inter;letter-spacing:.16em;text-transform:uppercase;color:#E9E8E6;cursor:default" style-hover="background:#E8604C">Edición limitada</span>
+    </div>
+
+    <div style="position:relative">
+      <h1 style="margin:0;font-family:Anton,sans-serif;font-size:clamp(66px,17.5vw,268px);line-height:.84;letter-spacing:-.025em;text-transform:uppercase;text-wrap:balance">
+        <span data-reveal="text" style="display:block;opacity:0;transform:translateY(60px);transition:opacity .9s ease,transform 1s cubic-bezier(.2,.8,.2,1);color:#2A2A2A">Gana una</span>
+        <span data-reveal="text" style="display:block;opacity:0;transform:translateY(60px);transition:opacity .9s ease .12s,transform 1s cubic-bezier(.2,.8,.2,1) .12s;color:#7B4AE2">Experiencia<br>Purple</span>
+      </h1>
+
+      <div data-par="-0.16" data-hero-photo="main" style="position:absolute;right:2%;top:14%;width:min(42vw,430px);z-index:5;will-change:transform">
+        <div data-reveal="photo" data-rot="-7" style="opacity:0;transform:scale(.2) rotate(35deg);transition:opacity 1s ease,transform 1.2s cubic-bezier(.2,.8,.2,1);position:relative;aspect-ratio:4/5;background:#d9d7d3;border:1px solid #2A2A2A;box-shadow:16px 20px 0 rgba(42,42,42,.14);display:flex;align-items:flex-end;padding:14px">
+          <span style="position:absolute;top:12px;left:12px;background:#E8604C;color:#E9E8E6;border-radius:999px;padding:6px 12px;font:600 9px/1 Inter;letter-spacing:.16em;text-transform:uppercase">Premio principal</span>
+          <span style="font:600 11px/1.3 Inter;letter-spacing:.14em;text-transform:uppercase;color:#6b6862">Foto del premio principal</span>
+        </div>
+      </div>
+
+      <div data-par="-0.3" data-hero-photo="mood" style="position:absolute;right:34%;top:52%;width:min(24vw,230px);z-index:6;will-change:transform">
+        <div data-reveal="photo" data-rot="8" style="opacity:0;transform:scale(.2) rotate(35deg);transition:opacity 1s ease .15s,transform 1.2s cubic-bezier(.2,.8,.2,1) .15s;position:relative;aspect-ratio:1/1;background:#cfcdc9;border:1px solid #2A2A2A;box-shadow:10px 12px 0 rgba(42,42,42,.12);display:flex;align-items:flex-end;padding:12px">
+          <span style="font:600 10px/1.3 Inter;letter-spacing:.14em;text-transform:uppercase;color:#6b6862">Ambiente de concierto</span>
+        </div>
+      </div>
+    </div>
+
+    <div style="display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:clamp(22px,4vw,60px);margin-top:clamp(180px,26vw,240px);position:relative;z-index:7">
+      <div style="max-width:430px;min-width:min(100%,280px)">
+        <p data-reveal="text" style="opacity:0;transform:translateY(24px);transition:opacity .8s ease,transform .8s cubic-bezier(.2,.8,.2,1);margin:0 0 22px;font:400 15px/1.55 Inter;color:#4a4845;text-wrap:pretty">Participa por premios inspirados en una experiencia fan única. Tu ticket digital te acerca a vivirlo.</p>
+        <div style="height:1px;background:#2A2A2A;opacity:.3;margin-bottom:18px"></div>
+        <div style="font:600 11px/1 Inter;letter-spacing:.18em;text-transform:uppercase;color:#2A2A2A;margin-bottom:8px">Cierra en</div>
+        <div style="font-family:Anton,sans-serif;font-size:clamp(26px,4vw,44px);line-height:1;letter-spacing:.01em;color:#2A2A2A"><span data-countdown="1">08 días · 14 h · 32 min · 00 s</span></div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:14px;min-width:min(100%,280px)">
+        <a href="#tickets" data-arrow-btn="1" style="display:inline-flex;align-items:center;justify-content:space-between;gap:24px;background:#2A2A2A;color:#E9E8E6;border-radius:999px;padding:22px 32px;font:600 13px/1 Inter;letter-spacing:.14em;text-transform:uppercase" style-hover="background:#7B4AE2;color:#E9E8E6">Participar ahora <span data-arrow="1" style="display:inline-block;transition:transform .3s cubic-bezier(.2,.8,.2,1);font-size:17px">→</span></a>
+        <div style="display:flex;align-items:baseline;gap:10px">
+          <span style="font-family:Anton,sans-serif;font-size:clamp(22px,3vw,34px);line-height:1;color:#7B4AE2">3.842</span>
+          <span style="font:600 10px/1 Inter;letter-spacing:.18em;text-transform:uppercase;color:#4a4845">/ 5.000 tickets registrados</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="premios" data-sec="2" data-cursor-color="#E8604C" style="position:relative;padding:clamp(70px,11vh,140px) clamp(16px,4vw,48px);border-top:1px solid rgba(42,42,42,.35)">
+    <div style="display:flex;align-items:flex-start;gap:18px;margin-bottom:clamp(14px,2vh,26px)">
+      <span style="font:600 11px/1 Inter;letter-spacing:.2em;color:#E8604C">01</span>
+      <span style="flex:1;height:1px;background:rgba(42,42,42,.3);margin-top:5px"></span>
+    </div>
+    <h2 data-reveal="text" style="opacity:0;transform:translateY(50px);transition:opacity .9s ease,transform 1s cubic-bezier(.2,.8,.2,1);margin:0;font-family:Anton,sans-serif;font-size:clamp(44px,11vw,166px);line-height:.86;letter-spacing:-.02em;text-transform:uppercase;max-width:14ch">Este line-up es para ti.</h2>
+    <p data-reveal="text" style="opacity:0;transform:translateY(24px);transition:opacity .8s ease .1s,transform .8s cubic-bezier(.2,.8,.2,1) .1s;margin:26px 0 clamp(40px,7vh,84px);font:400 15px/1.55 Inter;color:#4a4845;max-width:420px">Cada ticket participa por todos los premios de esta edición.</p>
+
+    <div style="display:flex;flex-wrap:wrap;gap:clamp(24px,4vw,56px);align-items:flex-start">
+      <div data-prize="major" style="flex:1 1 520px;min-width:min(100%,300px);position:relative">
+        <div data-par="-0.1">
+          <div data-reveal="photo" data-rot="-3" data-prize-card="1" style="opacity:0;transform:scale(.2) rotate(35deg);transition:opacity 1s ease,transform 1.1s cubic-bezier(.2,.8,.2,1);position:relative;aspect-ratio:5/4;background:#d9d7d3;border:1px solid #2A2A2A;box-shadow:18px 22px 0 rgba(123,74,226,.22);display:flex;align-items:center;justify-content:center">
+            <span style="position:absolute;top:14px;left:14px;background:#7B4AE2;color:#E9E8E6;border-radius:999px;padding:7px 14px;font:600 10px/1 Inter;letter-spacing:.16em;text-transform:uppercase">Premio mayor</span>
+            <span style="font:600 12px/1.3 Inter;letter-spacing:.14em;text-transform:uppercase;color:#6b6862">Foto del premio · Experiencia principal</span>
+          </div>
+        </div>
+        <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:20px;margin-top:22px">
+          <div>
+            <h3 style="margin:0;font-family:Anton,sans-serif;font-size:clamp(34px,6vw,76px);line-height:.9;letter-spacing:-.015em;text-transform:uppercase">Experiencia<br>principal</h3>
+            <span style="display:block;margin-top:12px;font:600 12px/1 Inter;letter-spacing:.16em;text-transform:uppercase;color:#7B4AE2">Valor referencial $8.500.000 COP</span>
+          </div>
+          <button data-arrow-btn="1" aria-label="Ver detalles del premio mayor" style="flex:none;width:62px;height:62px;border-radius:50%;border:1px solid #2A2A2A;background:#E9E8E6;font-size:20px;color:#2A2A2A;cursor:pointer" style-hover="background:#7B4AE2;color:#E9E8E6;border-color:#7B4AE2"><span data-arrow="1" style="display:inline-block;transition:transform .3s cubic-bezier(.2,.8,.2,1)">→</span></button>
+        </div>
+      </div>
+
+      <div style="flex:1 1 300px;min-width:min(100%,260px);display:flex;flex-direction:column;gap:clamp(30px,5vh,62px);padding-top:clamp(0px,6vw,90px)">
+        <div style="align-self:flex-start;width:min(100%,290px)">
+          <div data-par="-0.2">
+            <div data-reveal="photo" data-rot="6" data-prize-card="1" style="opacity:0;transform:scale(.2) rotate(35deg);transition:opacity 1s ease,transform 1.1s cubic-bezier(.2,.8,.2,1);position:relative;aspect-ratio:4/5;background:#cfcdc9;border:1px solid #2A2A2A;box-shadow:10px 14px 0 rgba(42,42,42,.14);display:flex;align-items:center;justify-content:center">
+              <span style="position:absolute;top:12px;left:12px;background:#E8604C;color:#E9E8E6;border-radius:999px;padding:6px 12px;font:600 9px/1 Inter;letter-spacing:.16em;text-transform:uppercase">Top pick</span>
+              <span style="font:600 11px/1.3 Inter;letter-spacing:.14em;text-transform:uppercase;color:#6b6862">Foto del premio</span>
+            </div>
+          </div>
+          <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:14px;margin-top:16px">
+            <div>
+              <h4 style="margin:0;font-family:Anton,sans-serif;font-size:clamp(26px,3.6vw,42px);line-height:.92;text-transform:uppercase">Kit premium</h4>
+              <span style="display:block;margin-top:7px;font:500 11px/1 Inter;letter-spacing:.14em;text-transform:uppercase;color:#4a4845">$1.200.000 COP</span>
+            </div>
+            <button data-arrow-btn="1" aria-label="Ver detalles del kit premium" style="flex:none;width:44px;height:44px;border-radius:50%;border:1px solid #2A2A2A;background:transparent;color:#2A2A2A;cursor:pointer" style-hover="background:#2A2A2A;color:#E9E8E6"><span data-arrow="1" style="display:inline-block;transition:transform .3s cubic-bezier(.2,.8,.2,1)">→</span></button>
+          </div>
+        </div>
+
+        <div style="align-self:flex-end;width:min(100%,250px)">
+          <div data-par="-0.14">
+            <div data-reveal="photo" data-rot="-8" data-prize-card="1" style="opacity:0;transform:scale(.2) rotate(35deg);transition:opacity 1s ease,transform 1.1s cubic-bezier(.2,.8,.2,1);position:relative;aspect-ratio:1/1;background:#d9d7d3;border:1px solid #2A2A2A;box-shadow:10px 14px 0 rgba(59,130,246,.2);display:flex;align-items:center;justify-content:center">
+              <span style="position:absolute;top:12px;left:12px;background:#3B82F6;color:#E9E8E6;border-radius:999px;padding:6px 12px;font:600 9px/1 Inter;letter-spacing:.16em;text-transform:uppercase">Bonus</span>
+              <span style="font:600 11px/1.3 Inter;letter-spacing:.14em;text-transform:uppercase;color:#6b6862">Foto del premio</span>
+            </div>
+          </div>
+          <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:14px;margin-top:16px">
+            <div>
+              <h4 style="margin:0;font-family:Anton,sans-serif;font-size:clamp(26px,3.6vw,42px);line-height:.92;text-transform:uppercase">Gift card</h4>
+              <span style="display:block;margin-top:7px;font:500 11px/1 Inter;letter-spacing:.14em;text-transform:uppercase;color:#4a4845">$500.000 COP</span>
+            </div>
+            <button data-arrow-btn="1" aria-label="Ver detalles de la gift card" style="flex:none;width:44px;height:44px;border-radius:50%;border:1px solid #2A2A2A;background:transparent;color:#2A2A2A;cursor:pointer" style-hover="background:#2A2A2A;color:#E9E8E6"><span data-arrow="1" style="display:inline-block;transition:transform .3s cubic-bezier(.2,.8,.2,1)">→</span></button>
+          </div>
+        </div>
+
+        <div style="align-self:flex-start;width:min(100%,270px)">
+          <div data-par="-0.24">
+            <div data-reveal="photo" data-rot="5" data-prize-card="1" style="opacity:0;transform:scale(.2) rotate(35deg);transition:opacity 1s ease,transform 1.1s cubic-bezier(.2,.8,.2,1);position:relative;aspect-ratio:4/3;background:#cfcdc9;border:1px solid #2A2A2A;box-shadow:10px 14px 0 rgba(42,42,42,.14);display:flex;align-items:center;justify-content:center">
+              <span style="position:absolute;top:12px;left:12px;background:#F2C230;color:#2A2A2A;border-radius:999px;padding:6px 12px;font:600 9px/1 Inter;letter-spacing:.16em;text-transform:uppercase">Bonus</span>
+              <span style="font:600 11px/1.3 Inter;letter-spacing:.14em;text-transform:uppercase;color:#6b6862">Foto del premio</span>
+            </div>
+          </div>
+          <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:14px;margin-top:16px">
+            <div>
+              <h4 style="margin:0;font-family:Anton,sans-serif;font-size:clamp(26px,3.6vw,42px);line-height:.92;text-transform:uppercase">Merch box</h4>
+              <span style="display:block;margin-top:7px;font:500 11px/1 Inter;letter-spacing:.14em;text-transform:uppercase;color:#4a4845">$320.000 COP</span>
+            </div>
+            <button data-arrow-btn="1" aria-label="Ver detalles del merch box" style="flex:none;width:44px;height:44px;border-radius:50%;border:1px solid #2A2A2A;background:transparent;color:#2A2A2A;cursor:pointer" style-hover="background:#2A2A2A;color:#E9E8E6"><span data-arrow="1" style="display:inline-block;transition:transform .3s cubic-bezier(.2,.8,.2,1)">→</span></button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="mecanica" data-sec="3" data-cursor-color="#3B82F6" style="position:relative;padding:clamp(70px,11vh,140px) clamp(16px,4vw,48px);border-top:1px solid rgba(42,42,42,.35);overflow:hidden">
+    <div style="display:flex;align-items:flex-start;gap:18px;margin-bottom:clamp(14px,2vh,26px)">
+      <span style="font:600 11px/1 Inter;letter-spacing:.2em;color:#3B82F6">02</span>
+      <span style="flex:1;height:1px;background:rgba(42,42,42,.3);margin-top:5px"></span>
+    </div>
+    <h2 style="margin:0 0 clamp(44px,7vh,90px);font-family:Anton,sans-serif;font-size:clamp(44px,11vw,166px);line-height:.86;letter-spacing:-.02em;text-transform:uppercase;max-width:15ch">
+      <span data-reveal="text" style="display:block;opacity:0;transform:translateY(50px);transition:opacity .9s ease,transform 1s cubic-bezier(.2,.8,.2,1);color:#E8604C">Un ticket</span>
+      <span data-reveal="text" style="display:block;opacity:0;transform:translateY(50px);transition:opacity .9s ease .1s,transform 1s cubic-bezier(.2,.8,.2,1) .1s;color:#2A2A2A">Una posibilidad real.</span>
+    </h2>
+
+    <div style="display:flex;flex-wrap:wrap;gap:clamp(30px,5vw,70px);align-items:flex-start">
+      <div style="flex:1 1 420px;min-width:min(100%,290px);display:flex;flex-direction:column;gap:clamp(30px,5vh,58px)">
+        <div data-reveal="text" style="opacity:0;transform:translateY(34px);transition:opacity .8s ease,transform .8s cubic-bezier(.2,.8,.2,1);display:flex;gap:20px;align-items:flex-start;max-width:440px;align-self:flex-start">
+          <div style="flex:none;width:76px;height:76px;background:#d9d7d3;border:1px solid #2A2A2A;display:flex;align-items:center;justify-content:center;transform:rotate(-6deg)"><span style="font:600 8px/1.3 Inter;letter-spacing:.12em;text-transform:uppercase;color:#6b6862;text-align:center">Ícono<br>editorial</span></div>
+          <div>
+            <span style="display:block;font:600 11px/1 Inter;letter-spacing:.2em;text-transform:uppercase;color:#3B82F6;margin-bottom:8px">01 · Elige tus tickets</span>
+            <p style="margin:0;font:400 15px/1.5 Inter;color:#4a4845">Suma participaciones desde $5.000 COP cada una.</p>
+          </div>
+        </div>
+        <div data-reveal="text" style="opacity:0;transform:translateY(34px);transition:opacity .8s ease,transform .8s cubic-bezier(.2,.8,.2,1);display:flex;gap:20px;align-items:flex-start;max-width:440px;align-self:flex-end;text-align:right;flex-direction:row-reverse">
+          <div style="flex:none;width:76px;height:76px;background:#cfcdc9;border:1px solid #2A2A2A;display:flex;align-items:center;justify-content:center;transform:rotate(7deg)"><span style="font:600 8px/1.3 Inter;letter-spacing:.12em;text-transform:uppercase;color:#6b6862;text-align:center">Ícono<br>editorial</span></div>
+          <div>
+            <span style="display:block;font:600 11px/1 Inter;letter-spacing:.2em;text-transform:uppercase;color:#E8604C;margin-bottom:8px">02 · Paga de forma segura</span>
+            <p style="margin:0;font:400 15px/1.5 Inter;color:#4a4845">Pasarela verificada y confirmación inmediata.</p>
+          </div>
+        </div>
+        <div data-reveal="text" style="opacity:0;transform:translateY(34px);transition:opacity .8s ease,transform .8s cubic-bezier(.2,.8,.2,1);display:flex;gap:20px;align-items:flex-start;max-width:440px;align-self:flex-start">
+          <div style="flex:none;width:76px;height:76px;background:#d9d7d3;border:1px solid #2A2A2A;display:flex;align-items:center;justify-content:center;transform:rotate(-4deg)"><span style="font:600 8px/1.3 Inter;letter-spacing:.12em;text-transform:uppercase;color:#6b6862;text-align:center">Ícono<br>editorial</span></div>
+          <div>
+            <span style="display:block;font:600 11px/1 Inter;letter-spacing:.2em;text-transform:uppercase;color:#7B4AE2;margin-bottom:8px">03 · Recibe tu pase digital</span>
+            <p style="margin:0;font:400 15px/1.5 Inter;color:#4a4845">Tu código único llega al instante a tu correo.</p>
+          </div>
+        </div>
+      </div>
+
+      <div data-par="-0.12" style="flex:1 1 330px;min-width:min(100%,280px);display:flex;justify-content:center">
+        <div data-reveal="photo" data-rot="-6" style="opacity:0;transform:scale(.2) rotate(35deg);transition:opacity 1s ease,transform 1.1s cubic-bezier(.2,.8,.2,1);position:relative;width:min(100%,340px);background:#E9E8E6;border:1px solid #2A2A2A;box-shadow:16px 20px 0 rgba(123,74,226,.24);padding:24px">
+          <span style="position:absolute;top:-13px;left:20px;background:#7B4AE2;color:#E9E8E6;border-radius:999px;padding:7px 14px;font:600 9px/1 Inter;letter-spacing:.16em;text-transform:uppercase">Tu pase digital</span>
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-top:6px">
+            <div>
+              <span style="display:block;font:600 9px/1 Inter;letter-spacing:.18em;text-transform:uppercase;color:#6b6862;margin-bottom:6px">Código</span>
+              <span style="font-family:Anton,sans-serif;font-size:32px;line-height:1;letter-spacing:.01em">PD-48392</span>
+            </div>
+            <span style="font-family:Anton,sans-serif;font-size:24px;line-height:1;color:#7B4AE2">$5.000<br><span style="font:600 9px/1 Inter;letter-spacing:.18em;color:#6b6862">COP</span></span>
+          </div>
+          <div style="margin:20px 0;border-top:1px dashed rgba(42,42,42,.45)"></div>
+          <div style="display:flex;gap:18px;align-items:center">
+            <div style="flex:none;width:104px;height:104px;background:#E9E8E6;border:1px solid #2A2A2A;padding:6px;display:grid;grid-template-columns:repeat(13,1fr);grid-template-rows:repeat(13,1fr);gap:1px">
+              <sc-for list="{{ qrCells }}" as="cell" hint-placeholder-count="169">
+                <span style="background:{{ cell.bg }}"></span>
+              </sc-for>
+            </div>
+            <div>
+              <span style="display:inline-block;background:#2A2A2A;color:#E9E8E6;border-radius:999px;padding:7px 13px;font:600 9px/1 Inter;letter-spacing:.14em;text-transform:uppercase">Participación confirmada</span>
+              <p style="margin:12px 0 0;font:400 12px/1.5 Inter;color:#4a4845">Escanea para validar tu participación en la Edición 05.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <a href="#tickets" data-arrow-btn="1" style="display:inline-flex;align-items:center;justify-content:space-between;gap:26px;margin-top:clamp(44px,7vh,86px);background:#2A2A2A;color:#E9E8E6;border-radius:999px;padding:24px 36px;font:600 14px/1 Inter;letter-spacing:.14em;text-transform:uppercase" style-hover="background:#E8604C;color:#E9E8E6">Quiero mi ticket <span data-arrow="1" style="display:inline-block;transition:transform .3s cubic-bezier(.2,.8,.2,1);font-size:18px">→</span></a>
+  </section>
+
+  <section id="tickets" data-sec="4" data-header-ink="#E9E8E6" data-cursor-color="#F2C230" style="position:relative;background:#2A2A2A;color:#E9E8E6;padding:clamp(70px,11vh,140px) clamp(16px,4vw,48px)">
+    <h2 data-reveal="text" style="opacity:0;transform:translateY(50px);transition:opacity .9s ease,transform 1s cubic-bezier(.2,.8,.2,1);margin:0 0 clamp(40px,6vh,72px);font-family:Anton,sans-serif;font-size:clamp(52px,14vw,210px);line-height:.86;letter-spacing:-.025em;text-transform:uppercase;color:transparent;-webkit-text-stroke:1.5px #E9E8E6">Elige tu suerte.</h2>
+
+    <div style="display:flex;flex-wrap:wrap;gap:clamp(30px,5vw,70px);align-items:flex-start">
+      <div style="flex:1 1 380px;min-width:min(100%,290px)">
+        <span style="display:block;font:600 10px/1 Inter;letter-spacing:.2em;text-transform:uppercase;color:rgba(233,232,230,.65);margin-bottom:18px">Cantidad de tickets</span>
+        <div style="display:flex;align-items:center;gap:20px;margin-bottom:34px">
+          <button onClick="{{ dec }}" aria-label="Quitar un ticket" style="width:64px;height:64px;border-radius:50%;border:1px solid rgba(233,232,230,.55);background:transparent;color:#E9E8E6;font-size:26px;line-height:1;cursor:pointer" style-hover="background:#E9E8E6;color:#2A2A2A">−</button>
+          <span style="font-family:Anton,sans-serif;font-size:clamp(64px,11vw,124px);line-height:.9;min-width:2.2ch;text-align:center">{{ qty }}</span>
+          <button onClick="{{ inc }}" aria-label="Agregar un ticket" style="width:64px;height:64px;border-radius:50%;border:1px solid rgba(233,232,230,.55);background:transparent;color:#E9E8E6;font-size:26px;line-height:1;cursor:pointer" style-hover="background:#7B4AE2;color:#E9E8E6;border-color:#7B4AE2">+</button>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:12px">
+          <button onClick="{{ pick1 }}" style="background:#F2C230;color:#2A2A2A;border:1px solid #2A2A2A;border-radius:6px;padding:14px 18px;font:600 11px/1 Inter;letter-spacing:.14em;text-transform:uppercase;transform:rotate(-3deg);cursor:pointer" style-hover="background:#E9E8E6">1 ticket · $5.000 COP</button>
+          <button onClick="{{ pick3 }}" style="background:#3B82F6;color:#E9E8E6;border:1px solid #2A2A2A;border-radius:6px;padding:14px 18px;font:600 11px/1 Inter;letter-spacing:.14em;text-transform:uppercase;transform:rotate(2deg);cursor:pointer" style-hover="background:#E9E8E6;color:#2A2A2A">3 tickets · $15.000 COP</button>
+          <button onClick="{{ pick5 }}" style="background:#7B4AE2;color:#E9E8E6;border:1px solid #2A2A2A;border-radius:6px;padding:14px 18px;font:600 11px/1 Inter;letter-spacing:.14em;text-transform:uppercase;transform:rotate(-2deg);cursor:pointer" style-hover="background:#E8604C">5 tickets · $25.000 COP</button>
+        </div>
+      </div>
+
+      <div style="flex:1 1 340px;min-width:min(100%,280px);border-top:1px solid rgba(233,232,230,.3);padding-top:26px">
+        <span style="display:block;font:600 10px/1 Inter;letter-spacing:.2em;text-transform:uppercase;color:rgba(233,232,230,.65);margin-bottom:10px">Total a pagar</span>
+        <div style="font-family:Anton,sans-serif;font-size:clamp(52px,9vw,110px);line-height:.9;letter-spacing:-.01em;color:#F2C230">{{ total }}</div>
+        <p style="margin:14px 0 26px;font:400 12px/1.5 Inter;color:rgba(233,232,230,.7)">Recibirás un código único por cada participación.</p>
+        <button data-arrow-btn="1" style="display:flex;width:100%;align-items:center;justify-content:space-between;gap:20px;background:#7B4AE2;color:#E9E8E6;border:none;border-radius:999px;padding:24px 32px;font:600 13px/1 Inter;letter-spacing:.14em;text-transform:uppercase;cursor:pointer" style-hover="background:#E9E8E6;color:#2A2A2A">Continuar al pago <span data-arrow="1" style="display:inline-block;transition:transform .3s cubic-bezier(.2,.8,.2,1);font-size:17px">→</span></button>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:20px">
+          <span style="border:1px solid rgba(233,232,230,.45);border-radius:999px;padding:8px 13px;font:500 9px/1 Inter;letter-spacing:.16em;text-transform:uppercase;color:rgba(233,232,230,.85)">Pago seguro</span>
+          <span style="border:1px solid rgba(233,232,230,.45);border-radius:999px;padding:8px 13px;font:500 9px/1 Inter;letter-spacing:.16em;text-transform:uppercase;color:rgba(233,232,230,.85)">Ticket único</span>
+          <span style="border:1px solid rgba(233,232,230,.45);border-radius:999px;padding:8px 13px;font:500 9px/1 Inter;letter-spacing:.16em;text-transform:uppercase;color:rgba(233,232,230,.85)">Resultado público</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section data-sec="5" data-cursor-color="#E9E8E6" style="position:relative;padding:clamp(70px,11vh,140px) clamp(16px,4vw,48px) clamp(90px,14vh,170px);overflow:hidden;background:#E9E8E6">
+    <div data-circle="1" style="position:absolute;right:-10vw;bottom:-14vw;width:60vw;height:60vw;border-radius:50%;background:#7B4AE2;transform:scale(.18);will-change:transform;pointer-events:none"></div>
+    <div style="position:relative;z-index:2">
+      <div style="display:flex;align-items:flex-start;gap:18px;margin-bottom:clamp(14px,2vh,26px)">
+        <span data-inv="1" style="font:600 11px/1 Inter;letter-spacing:.2em;color:#7B4AE2">03</span>
+        <span style="flex:1;height:1px;background:rgba(42,42,42,.3);margin-top:5px"></span>
+      </div>
+      <h2 data-reveal="text" data-inv="1" style="opacity:0;transform:translateY(50px);transition:opacity .9s ease,transform 1s cubic-bezier(.2,.8,.2,1),color .5s ease;margin:0 0 clamp(44px,7vh,88px);font-family:Anton,sans-serif;font-size:clamp(44px,11vw,166px);line-height:.86;letter-spacing:-.02em;text-transform:uppercase;max-width:13ch">Todo claro. Todo purple.</h2>
+
+      <div style="display:flex;flex-wrap:wrap;gap:clamp(28px,4vw,64px);margin-bottom:clamp(40px,6vh,72px)">
+        <div data-inv="1" style="flex:1 1 240px;min-width:min(100%,220px);transition:color .5s ease">
+          <div style="font-family:Anton,sans-serif;font-size:clamp(46px,7vw,92px);line-height:.9">5.000</div>
+          <span style="font:600 10px/1 Inter;letter-spacing:.2em;text-transform:uppercase">Tickets disponibles</span>
+        </div>
+        <div data-inv="1" style="flex:1 1 240px;min-width:min(100%,220px);transition:color .5s ease">
+          <div style="font-family:Anton,sans-serif;font-size:clamp(46px,7vw,92px);line-height:.9">1</div>
+          <span style="font:600 10px/1 Inter;letter-spacing:.2em;text-transform:uppercase">Código único por ticket</span>
+        </div>
+        <div data-inv="1" style="flex:1 1 240px;min-width:min(100%,220px);transition:color .5s ease">
+          <div style="font-family:Anton,sans-serif;font-size:clamp(46px,7vw,92px);line-height:.9">1</div>
+          <span style="font:600 10px/1 Inter;letter-spacing:.2em;text-transform:uppercase">Sorteo transparente</span>
+        </div>
+      </div>
+
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:34px">
+        <span data-inv-pill="1" style="border:1px solid #2A2A2A;border-radius:999px;padding:8px 14px;font:500 9px/1 Inter;letter-spacing:.16em;text-transform:uppercase;transition:color .5s ease,border-color .5s ease">Resultados publicados</span>
+        <span data-inv-pill="1" style="border:1px solid #2A2A2A;border-radius:999px;padding:8px 14px;font:500 9px/1 Inter;letter-spacing:.16em;text-transform:uppercase;transition:color .5s ease,border-color .5s ease">Ganadores verificados</span>
+        <span data-inv-pill="1" style="border:1px solid #2A2A2A;border-radius:999px;padding:8px 14px;font:500 9px/1 Inter;letter-spacing:.16em;text-transform:uppercase;transition:color .5s ease,border-color .5s ease">Premio entregado</span>
+      </div>
+
+      <div style="max-width:720px">
+        <div data-inv="1" style="display:flex;justify-content:space-between;font:600 10px/1 Inter;letter-spacing:.18em;text-transform:uppercase;margin-bottom:10px;transition:color .5s ease"><span>3.842 vendidos</span><span>1.158 restantes</span></div>
+        <div data-inv-bar="1" style="height:14px;border:1px solid #2A2A2A;background:transparent;display:flex;transition:border-color .5s ease">
+          <div style="width:76.8%;background:#E8604C"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="ganadores" data-sec="6" data-header-ink="#E9E8E6" data-cursor-color="#E9E8E6" style="position:relative;background:#E8604C;color:#2A2A2A;padding:clamp(70px,11vh,140px) clamp(16px,4vw,48px)">
+    <div style="display:flex;align-items:flex-start;gap:18px;margin-bottom:clamp(14px,2vh,26px)">
+      <span style="font:600 11px/1 Inter;letter-spacing:.2em;color:#2A2A2A">04</span>
+      <span style="flex:1;height:1px;background:rgba(42,42,42,.35);margin-top:5px"></span>
+    </div>
+    <h2 data-reveal="text" style="opacity:0;transform:translateY(50px);transition:opacity .9s ease,transform 1s cubic-bezier(.2,.8,.2,1);margin:0 0 clamp(40px,6vh,72px);font-family:Anton,sans-serif;font-size:clamp(40px,9.5vw,142px);line-height:.88;letter-spacing:-.02em;text-transform:uppercase;max-width:16ch">Ellos ya vivieron la experiencia.</h2>
+
+    <div style="border-top:1px solid #2A2A2A">
+      <div data-winner="1" style="border-bottom:1px solid #2A2A2A;padding:20px 4px;display:flex;flex-wrap:wrap;align-items:center;gap:16px clamp(14px,3vw,34px);transition:transform .35s cubic-bezier(.2,.8,.2,1),background-color .35s ease;cursor:default">
+        <span style="font:600 11px/1 Inter;letter-spacing:.16em;width:44px">04</span>
+        <div style="flex:none;width:58px;height:58px;background:rgba(233,232,230,.55);border:1px solid #2A2A2A;display:flex;align-items:center;justify-content:center;transform:rotate(-5deg)"><span style="font:600 7px/1.2 Inter;letter-spacing:.1em;text-transform:uppercase;color:#4a4845;text-align:center">Foto<br>ganador</span></div>
+        <span style="flex:1 1 180px;font-family:Anton,sans-serif;font-size:clamp(26px,3.4vw,44px);line-height:1;text-transform:uppercase">Valentina R.</span>
+        <span style="font:500 11px/1 Inter;letter-spacing:.16em;text-transform:uppercase;width:110px">Bogotá</span>
+        <span style="font:500 11px/1 Inter;letter-spacing:.16em;text-transform:uppercase;flex:1 1 150px">Experiencia principal</span>
+        <span style="background:#2A2A2A;color:#E9E8E6;border-radius:999px;padding:7px 13px;font:600 9px/1 Inter;letter-spacing:.14em;text-transform:uppercase">Premio entregado ✓</span>
+        <button data-arrow-btn="1" aria-label="Ver edición 04" style="flex:none;width:44px;height:44px;border-radius:50%;border:1px solid #2A2A2A;background:transparent;color:#2A2A2A;cursor:pointer" style-hover="background:#2A2A2A;color:#E9E8E6"><span data-arrow="1" style="display:inline-block;transition:transform .3s cubic-bezier(.2,.8,.2,1)">→</span></button>
+        <p data-winner-detail="1" style="flex:1 1 100%;margin:0;max-height:0;overflow:hidden;opacity:0;transition:max-height .35s ease,opacity .35s ease;font:400 12px/1.5 Inter;color:#3a2a27">Edición 04 · Entregado el 12 de junio de 2026 · Verificado en transmisión pública.</p>
+      </div>
+      <div data-winner="1" style="border-bottom:1px solid #2A2A2A;padding:20px 4px;display:flex;flex-wrap:wrap;align-items:center;gap:16px clamp(14px,3vw,34px);transition:transform .35s cubic-bezier(.2,.8,.2,1),background-color .35s ease;cursor:default">
+        <span style="font:600 11px/1 Inter;letter-spacing:.16em;width:44px">03</span>
+        <div style="flex:none;width:58px;height:58px;background:rgba(233,232,230,.55);border:1px solid #2A2A2A;display:flex;align-items:center;justify-content:center;transform:rotate(4deg)"><span style="font:600 7px/1.2 Inter;letter-spacing:.1em;text-transform:uppercase;color:#4a4845;text-align:center">Foto<br>ganador</span></div>
+        <span style="flex:1 1 180px;font-family:Anton,sans-serif;font-size:clamp(26px,3.4vw,44px);line-height:1;text-transform:uppercase">Sebastián M.</span>
+        <span style="font:500 11px/1 Inter;letter-spacing:.16em;text-transform:uppercase;width:110px">Medellín</span>
+        <span style="font:500 11px/1 Inter;letter-spacing:.16em;text-transform:uppercase;flex:1 1 150px">Kit premium</span>
+        <span style="background:#2A2A2A;color:#E9E8E6;border-radius:999px;padding:7px 13px;font:600 9px/1 Inter;letter-spacing:.14em;text-transform:uppercase">Premio entregado ✓</span>
+        <button data-arrow-btn="1" aria-label="Ver edición 03" style="flex:none;width:44px;height:44px;border-radius:50%;border:1px solid #2A2A2A;background:transparent;color:#2A2A2A;cursor:pointer" style-hover="background:#2A2A2A;color:#E9E8E6"><span data-arrow="1" style="display:inline-block;transition:transform .3s cubic-bezier(.2,.8,.2,1)">→</span></button>
+        <p data-winner-detail="1" style="flex:1 1 100%;margin:0;max-height:0;overflow:hidden;opacity:0;transition:max-height .35s ease,opacity .35s ease;font:400 12px/1.5 Inter;color:#3a2a27">Edición 03 · Entregado el 28 de abril de 2026 · Verificado en transmisión pública.</p>
+      </div>
+      <div data-winner="1" style="border-bottom:1px solid #2A2A2A;padding:20px 4px;display:flex;flex-wrap:wrap;align-items:center;gap:16px clamp(14px,3vw,34px);transition:transform .35s cubic-bezier(.2,.8,.2,1),background-color .35s ease;cursor:default">
+        <span style="font:600 11px/1 Inter;letter-spacing:.16em;width:44px">02</span>
+        <div style="flex:none;width:58px;height:58px;background:rgba(233,232,230,.55);border:1px solid #2A2A2A;display:flex;align-items:center;justify-content:center;transform:rotate(-7deg)"><span style="font:600 7px/1.2 Inter;letter-spacing:.1em;text-transform:uppercase;color:#4a4845;text-align:center">Foto<br>ganador</span></div>
+        <span style="flex:1 1 180px;font-family:Anton,sans-serif;font-size:clamp(26px,3.4vw,44px);line-height:1;text-transform:uppercase">Laura T.</span>
+        <span style="font:500 11px/1 Inter;letter-spacing:.16em;text-transform:uppercase;width:110px">Cali</span>
+        <span style="font:500 11px/1 Inter;letter-spacing:.16em;text-transform:uppercase;flex:1 1 150px">Gift card</span>
+        <span style="background:#2A2A2A;color:#E9E8E6;border-radius:999px;padding:7px 13px;font:600 9px/1 Inter;letter-spacing:.14em;text-transform:uppercase">Premio entregado ✓</span>
+        <button data-arrow-btn="1" aria-label="Ver edición 02" style="flex:none;width:44px;height:44px;border-radius:50%;border:1px solid #2A2A2A;background:transparent;color:#2A2A2A;cursor:pointer" style-hover="background:#2A2A2A;color:#E9E8E6"><span data-arrow="1" style="display:inline-block;transition:transform .3s cubic-bezier(.2,.8,.2,1)">→</span></button>
+        <p data-winner-detail="1" style="flex:1 1 100%;margin:0;max-height:0;overflow:hidden;opacity:0;transition:max-height .35s ease,opacity .35s ease;font:400 12px/1.5 Inter;color:#3a2a27">Edición 02 · Entregado el 9 de marzo de 2026 · Verificado en transmisión pública.</p>
+      </div>
+      <div data-winner="1" style="border-bottom:1px solid #2A2A2A;padding:20px 4px;display:flex;flex-wrap:wrap;align-items:center;gap:16px clamp(14px,3vw,34px);transition:transform .35s cubic-bezier(.2,.8,.2,1),background-color .35s ease;cursor:default">
+        <span style="font:600 11px/1 Inter;letter-spacing:.16em;width:44px">01</span>
+        <div style="flex:none;width:58px;height:58px;background:rgba(233,232,230,.55);border:1px solid #2A2A2A;display:flex;align-items:center;justify-content:center;transform:rotate(6deg)"><span style="font:600 7px/1.2 Inter;letter-spacing:.1em;text-transform:uppercase;color:#4a4845;text-align:center">Foto<br>ganador</span></div>
+        <span style="flex:1 1 180px;font-family:Anton,sans-serif;font-size:clamp(26px,3.4vw,44px);line-height:1;text-transform:uppercase">Daniela P.</span>
+        <span style="font:500 11px/1 Inter;letter-spacing:.16em;text-transform:uppercase;width:110px">Barranquilla</span>
+        <span style="font:500 11px/1 Inter;letter-spacing:.16em;text-transform:uppercase;flex:1 1 150px">Merch box</span>
+        <span style="background:#2A2A2A;color:#E9E8E6;border-radius:999px;padding:7px 13px;font:600 9px/1 Inter;letter-spacing:.14em;text-transform:uppercase">Premio entregado ✓</span>
+        <button data-arrow-btn="1" aria-label="Ver edición 01" style="flex:none;width:44px;height:44px;border-radius:50%;border:1px solid #2A2A2A;background:transparent;color:#2A2A2A;cursor:pointer" style-hover="background:#2A2A2A;color:#E9E8E6"><span data-arrow="1" style="display:inline-block;transition:transform .3s cubic-bezier(.2,.8,.2,1)">→</span></button>
+        <p data-winner-detail="1" style="flex:1 1 100%;margin:0;max-height:0;overflow:hidden;opacity:0;transition:max-height .35s ease,opacity .35s ease;font:400 12px/1.5 Inter;color:#3a2a27">Edición 01 · Entregado el 17 de enero de 2026 · Verificado en transmisión pública.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="faq" data-sec="7" data-cursor-color="#7B4AE2" style="padding:clamp(70px,11vh,140px) clamp(16px,4vw,48px);background:#E9E8E6">
+    <h2 data-reveal="text" style="opacity:0;transform:translateY(40px);transition:opacity .9s ease,transform 1s cubic-bezier(.2,.8,.2,1);margin:0 0 clamp(30px,5vh,56px);font-family:Anton,sans-serif;font-size:clamp(34px,6vw,84px);line-height:.9;letter-spacing:-.02em;text-transform:uppercase">Preguntas frecuentes</h2>
+    <div style="max-width:880px;border-top:1px solid #2A2A2A">
+      <div style="border-bottom:1px solid #2A2A2A">
+        <button onClick="{{ toggle0 }}" style="width:100%;display:flex;align-items:center;justify-content:space-between;gap:20px;background:none;border:none;padding:24px 2px;text-align:left;cursor:pointer;font-family:Anton,sans-serif;font-size:clamp(20px,3vw,34px);line-height:1.05;text-transform:uppercase;color:#2A2A2A" style-hover="color:#7B4AE2">¿Cómo recibo mi ticket? <span style="font:400 24px/1 Inter;color:#7B4AE2">{{ sign0 }}</span></button>
+        <sc-if value="{{ open0 }}"><p style="margin:0;padding:0 2px 26px;font:400 15px/1.6 Inter;color:#4a4845;max-width:620px">Después del pago recibes por correo tu pase digital con un código único e irrepetible por participación.</p></sc-if>
+      </div>
+      <div style="border-bottom:1px solid #2A2A2A">
+        <button onClick="{{ toggle1 }}" style="width:100%;display:flex;align-items:center;justify-content:space-between;gap:20px;background:none;border:none;padding:24px 2px;text-align:left;cursor:pointer;font-family:Anton,sans-serif;font-size:clamp(20px,3vw,34px);line-height:1.05;text-transform:uppercase;color:#2A2A2A" style-hover="color:#7B4AE2">¿Cuándo se realiza el sorteo? <span style="font:400 24px/1 Inter;color:#7B4AE2">{{ sign1 }}</span></button>
+        <sc-if value="{{ open1 }}"><p style="margin:0;padding:0 2px 26px;font:400 15px/1.6 Inter;color:#4a4845;max-width:620px">Al completar los 5.000 tickets o en la fecha de cierre publicada, según lo que ocurra primero.</p></sc-if>
+      </div>
+      <div style="border-bottom:1px solid #2A2A2A">
+        <button onClick="{{ toggle2 }}" style="width:100%;display:flex;align-items:center;justify-content:space-between;gap:20px;background:none;border:none;padding:24px 2px;text-align:left;cursor:pointer;font-family:Anton,sans-serif;font-size:clamp(20px,3vw,34px);line-height:1.05;text-transform:uppercase;color:#2A2A2A" style-hover="color:#7B4AE2">¿Dónde veo a los ganadores? <span style="font:400 24px/1 Inter;color:#7B4AE2">{{ sign2 }}</span></button>
+        <sc-if value="{{ open2 }}"><p style="margin:0;padding:0 2px 26px;font:400 15px/1.6 Inter;color:#4a4845;max-width:620px">En la sección Hall of Fame de esta página y en la transmisión pública de cada edición.</p></sc-if>
+      </div>
+      <div style="border-bottom:1px solid #2A2A2A">
+        <button onClick="{{ toggle3 }}" style="width:100%;display:flex;align-items:center;justify-content:space-between;gap:20px;background:none;border:none;padding:24px 2px;text-align:left;cursor:pointer;font-family:Anton,sans-serif;font-size:clamp(20px,3vw,34px);line-height:1.05;text-transform:uppercase;color:#2A2A2A" style-hover="color:#7B4AE2">¿Puedo comprar más de un ticket? <span style="font:400 24px/1 Inter;color:#7B4AE2">{{ sign3 }}</span></button>
+        <sc-if value="{{ open3 }}"><p style="margin:0;padding:0 2px 26px;font:400 15px/1.6 Inter;color:#4a4845;max-width:620px">Sí. Cada ticket adicional es una participación independiente con su propio código.</p></sc-if>
+      </div>
+    </div>
+  </section>
+
+  <footer data-sec="8" data-header-ink="#E9E8E6" data-cursor-color="#7B4AE2" style="background:#2A2A2A;color:#E9E8E6;padding:clamp(60px,9vh,110px) clamp(16px,4vw,48px) clamp(90px,10vh,70px);overflow:hidden">
+    <div style="font-family:Anton,sans-serif;font-size:clamp(58px,17vw,260px);line-height:.84;letter-spacing:-.03em;text-transform:uppercase;color:transparent;-webkit-text-stroke:1.5px rgba(233,232,230,.85)">Borahae</div>
+    <div style="display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:30px;margin-top:clamp(26px,4vh,50px)">
+      <p style="margin:0;max-width:420px;font-family:Anton,sans-serif;font-size:clamp(22px,3vw,40px);line-height:1;text-transform:uppercase;color:#E9E8E6">Tu próximo ticket puede cambiarlo todo.</p>
+      <a href="#tickets" data-arrow-btn="1" style="display:inline-flex;align-items:center;gap:20px;background:#7B4AE2;color:#E9E8E6;border-radius:999px;padding:22px 32px;font:600 13px/1 Inter;letter-spacing:.14em;text-transform:uppercase" style-hover="background:#E9E8E6;color:#2A2A2A">Participar <span data-arrow="1" style="display:inline-block;transition:transform .3s cubic-bezier(.2,.8,.2,1);font-size:17px">→</span></a>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:18px 30px;margin:clamp(34px,5vh,60px) 0 22px;padding-top:22px;border-top:1px solid rgba(233,232,230,.28)">
+      <a href="#faq" style="font:500 11px/1 Inter;letter-spacing:.16em;text-transform:uppercase;color:rgba(233,232,230,.8)" style-hover="color:#F2C230">Términos y condiciones</a>
+      <a href="#faq" style="font:500 11px/1 Inter;letter-spacing:.16em;text-transform:uppercase;color:rgba(233,232,230,.8)" style-hover="color:#F2C230">Preguntas frecuentes</a>
+      <a href="#faq" style="font:500 11px/1 Inter;letter-spacing:.16em;text-transform:uppercase;color:rgba(233,232,230,.8)" style-hover="color:#F2C230">Política de privacidad</a>
+      <a href="#faq" style="font:500 11px/1 Inter;letter-spacing:.16em;text-transform:uppercase;color:rgba(233,232,230,.8)" style-hover="color:#F2C230">Contacto</a>
+    </div>
+    <p style="margin:0;max-width:640px;font:400 11px/1.6 Inter;color:rgba(233,232,230,.55)">Plataforma fan no oficial. Sin afiliación, patrocinio ni relación con HYBE, BIGHIT MUSIC o BTS. Sorteos sujetos a términos y condiciones aplicables en Colombia.</p>
+  </footer>
+</main>
+
+<div data-mobile-cta="1" style="display:none;position:fixed;left:12px;right:12px;bottom:12px;z-index:8500">
+  <a href="#tickets" style="display:flex;align-items:center;justify-content:center;gap:12px;background:#7B4AE2;color:#E9E8E6;border:1px solid #2A2A2A;border-radius:999px;padding:18px;font:600 12px/1 Inter;letter-spacing:.14em;text-transform:uppercase">Participar · $5.000 COP →</a>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{}">
+class Component extends DCLogic {
+  state = { qty: 1, menuOpen: false, faq: 0 };
+
+  show(el) {
+    el.dataset.shown = "1";
+    el.style.opacity = "1";
+    el.style.transform = el.dataset.reveal === "photo"
+      ? "scale(1) rotate(" + (el.dataset.rot || 0) + "deg)"
+      : "translateY(0)";
+  }
+
+  applyReveals() {
+    document.querySelectorAll('[data-reveal][data-shown="1"]').forEach((el) => this.show(el));
+  }
+
+  componentDidUpdate() { this.applyReveals(); }
+
+  tick() {
+    const el = document.querySelector("[data-countdown]");
+    if (!el) return;
+    const left = Math.max(0, this.deadline - Date.now());
+    const p = (n) => String(n).padStart(2, "0");
+    el.textContent = p(Math.floor(left / 86400000)) + " días · " + p(Math.floor(left / 3600000) % 24) +
+      " h · " + p(Math.floor(left / 60000) % 60) + " min · " + p(Math.floor(left / 1000) % 60) + " s";
+  }
+
+  componentDidMount() {
+    this.deadline = Date.now() + ((8 * 24 + 14) * 60 + 32) * 60 * 1000;
+    this.tick();
+    this.timer = setInterval(() => this.tick(), 1000);
+
+    const root = document;
+    const q = (s) => Array.from(root.querySelectorAll(s));
+
+    // reveal
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach((e) => { if (e.isIntersecting) this.show(e.target); });
+    }, { threshold: 0.12, rootMargin: "0px 0px -8% 0px" });
+    q("[data-reveal]").forEach((el) => io.observe(el));
+
+    // failsafe: hidden/print/reduced-motion contexts where IO never fires
+    const revealAll = () => q("[data-reveal]").forEach((el) => this.show(el));
+    if (document.visibilityState !== "visible" || window.matchMedia("(prefers-reduced-motion: reduce)").matches) revealAll();
+    this.failsafe = setTimeout(() => {
+      if (!root.querySelector('[data-reveal][data-shown="1"]')) revealAll();
+    }, 1400);
+    this.onPrint = revealAll;
+    window.addEventListener("beforeprint", this.onPrint);
+
+    // cursor dot
+    const dot = root.querySelector("[data-cursor]");
+    if (dot && window.matchMedia("(hover: hover)").matches) {
+      dot.style.display = "block";
+      this.onMove = (ev) => { dot.style.transform = "translate(" + (ev.clientX - 5) + "px," + (ev.clientY - 5) + "px)"; };
+      window.addEventListener("mousemove", this.onMove);
+      const cio = new IntersectionObserver((entries) => {
+        entries.forEach((e) => {
+          if (e.isIntersecting && e.intersectionRatio > 0.35) dot.style.backgroundColor = e.target.dataset.cursorColor;
+        });
+      }, { threshold: [0.36] });
+      q("[data-cursor-color]").forEach((el) => cio.observe(el));
+      this.cio = cio;
+    }
+
+    // header ink over dark / saturated sections
+    const word = root.querySelector("[data-header-word]");
+    if (word) {
+      this.setInk = (c) => { word.style.color = c; };
+      const hio = new IntersectionObserver((entries) => {
+        entries.forEach((e) => {
+          if (e.isIntersecting && e.intersectionRatio > 0.02) this.darkSection = e.target.dataset.headerInk;
+          else if (e.target.dataset.headerInk === this.darkSection) this.darkSection = null;
+          this.setInk(this.darkSection || this.circleInk || "#2A2A2A");
+        });
+      }, { rootMargin: "-60px 0px -85% 0px", threshold: [0, 0.03] });
+      q("[data-header-ink]").forEach((el) => hio.observe(el));
+      this.hio = hio;
+    }
+
+    // arrow shift + prize/winner hover
+    q("[data-arrow-btn]").forEach((btn) => {
+      const arrow = btn.querySelector("[data-arrow]");
+      btn.addEventListener("mouseenter", () => { if (arrow) arrow.style.transform = "translateX(10px)"; });
+      btn.addEventListener("mouseleave", () => { if (arrow) arrow.style.transform = "translateX(0)"; });
+    });
+    q("[data-prize-card]").forEach((card) => {
+      const rot = card.dataset.rot || 0;
+      card.addEventListener("mouseenter", () => { if (card.dataset.shown) card.style.transform = "scale(1.04) rotate(" + rot * 0.3 + "deg)"; });
+      card.addEventListener("mouseleave", () => { if (card.dataset.shown) card.style.transform = "scale(1) rotate(" + rot + "deg)"; });
+    });
+    q("[data-winner]").forEach((row) => {
+      const detail = row.querySelector("[data-winner-detail]");
+      row.addEventListener("mouseenter", () => {
+        row.style.transform = "scale(1.012)";
+        row.style.backgroundColor = "rgba(233,232,230,.22)";
+        if (detail) { detail.style.maxHeight = "60px"; detail.style.opacity = "1"; }
+      });
+      row.addEventListener("mouseleave", () => {
+        row.style.transform = "scale(1)";
+        row.style.backgroundColor = "transparent";
+        if (detail) { detail.style.maxHeight = "0"; detail.style.opacity = "0"; }
+      });
+    });
+
+    // parallax + growing circle
+    const pars = q("[data-par]");
+    const circle = root.querySelector("[data-circle]");
+    const invSection = circle ? circle.closest("section") : null;
+    const invs = q("[data-inv]");
+    const invPills = q("[data-inv-pill]");
+    const invBars = q("[data-inv-bar]");
+    let raf = null;
+    const frame = () => {
+      raf = null;
+      const vh = window.innerHeight;
+      if (this.lastW !== window.innerWidth && this.onResize) { this.lastW = window.innerWidth; this.onResize(); }
+      pars.forEach((el) => {
+        const r = el.getBoundingClientRect();
+        if (r.bottom < -200 || r.top > vh + 200) return;
+        const p = (r.top + r.height / 2 - vh / 2) * parseFloat(el.dataset.par || 0);
+        el.style.transform = "translate3d(0," + p.toFixed(1) + "px,0)";
+      });
+      if (invSection && circle) {
+        const r = invSection.getBoundingClientRect();
+        const prog = Math.min(1, Math.max(0, (vh - r.top) / (vh + r.height * 0.5)));
+        circle.style.transform = "scale(" + (0.18 + prog * 3.1).toFixed(3) + ")";
+        const on = prog > 0.62;
+        invs.forEach((el) => { el.style.color = on ? "#E9E8E6" : ""; });
+        invPills.forEach((el) => { el.style.color = on ? "#E9E8E6" : ""; el.style.borderColor = on ? "rgba(233,232,230,.7)" : "#2A2A2A"; });
+        invBars.forEach((el) => { el.style.borderColor = on ? "rgba(233,232,230,.7)" : "#2A2A2A"; });
+        const topCovered = on && r.top < 80 && r.bottom > 80;
+        this.circleInk = topCovered ? "#E9E8E6" : null;
+        if (this.setInk) this.setInk(this.darkSection || this.circleInk || "#2A2A2A");
+      }
+    };
+    this.onScroll = () => { if (!raf) raf = requestAnimationFrame(frame); };
+    window.addEventListener("scroll", this.onScroll, { passive: true });
+    window.addEventListener("resize", this.onScroll);
+    frame();
+
+    // hero photo repositioning + mobile CTA
+    const cta = root.querySelector("[data-mobile-cta]");
+    const heroMain = root.querySelector('[data-hero-photo="main"]');
+    const heroMood = root.querySelector('[data-hero-photo="mood"]');
+    this.onResize = () => {
+      const m = window.innerWidth < 760;
+      if (cta) cta.style.display = m ? "block" : "none";
+      if (heroMain) {
+        heroMain.style.width = m ? "56vw" : "min(34vw,380px)";
+        heroMain.style.top = m ? "40%" : "6%";
+        heroMain.style.right = m ? "-2%" : "-1%";
+      }
+      if (heroMood) {
+        heroMood.style.width = m ? "34vw" : "min(19vw,200px)";
+        heroMood.style.top = m ? "104%" : "88%";
+        heroMood.style.right = m ? "auto" : "auto";
+        heroMood.style.left = m ? "2%" : "42%";
+      }
+    };
+    this.lastW = window.innerWidth;
+    this.onResize();
+    requestAnimationFrame(() => this.onResize());
+    this.resizeSettle = setTimeout(() => { this.lastW = window.innerWidth; this.onResize(); }, 350);
+    window.addEventListener("resize", this.onResize);
+    if (window.ResizeObserver) {
+      this.ro = new ResizeObserver(() => this.onResize());
+      this.ro.observe(document.documentElement);
+    }
+    this.io = io;
+  }
+
+  componentWillUnmount() {
+    clearInterval(this.timer);
+    clearTimeout(this.failsafe);
+    clearTimeout(this.resizeSettle);
+    if (this.onPrint) window.removeEventListener("beforeprint", this.onPrint);
+    if (this.ro) this.ro.disconnect();
+    window.removeEventListener("scroll", this.onScroll);
+    window.removeEventListener("resize", this.onScroll);
+    window.removeEventListener("resize", this.onResize);
+    if (this.onMove) window.removeEventListener("mousemove", this.onMove);
+    if (this.io) this.io.disconnect();
+    if (this.cio) this.cio.disconnect();
+    if (this.hio) this.hio.disconnect();
+  }
+
+  qr() {
+    const cells = [];
+    let s = 7;
+    for (let i = 0; i < 169; i++) {
+      s = (s * 1103515245 + 12345) % 2147483648;
+      const r = Math.floor(i / 13), c = i % 13;
+      const corner = (r < 3 && c < 3) || (r < 3 && c > 9) || (r > 9 && c < 3);
+      const on = corner ? !((r === 1 && c !== 1 && c !== 11) || (c === 1 && r !== 1 && r !== 11)) : (s % 100) > 52;
+      cells.push({ bg: on ? "#2A2A2A" : "transparent" });
+    }
+    return cells;
+  }
+
+  renderVals() {
+    const qty = this.state.qty;
+    const set = (n) => this.setState({ qty: n });
+    const tog = (i) => this.setState((st) => ({ faq: st.faq === i ? -1 : i }));
+    return {
+      qty,
+      total: "$" + (qty * 5000).toLocaleString("es-CO") + " COP",
+      qrCells: this.qr(),
+      menuOpen: this.state.menuOpen,
+      toggleMenu: () => this.setState((st) => ({ menuOpen: !st.menuOpen })),
+      inc: () => this.setState((st) => ({ qty: Math.min(50, st.qty + 1) })),
+      dec: () => this.setState((st) => ({ qty: Math.max(1, st.qty - 1) })),
+      pick1: () => set(1), pick3: () => set(3), pick5: () => set(5),
+      open0: this.state.faq === 0, open1: this.state.faq === 1, open2: this.state.faq === 2, open3: this.state.faq === 3,
+      sign0: this.state.faq === 0 ? "−" : "+", sign1: this.state.faq === 1 ? "−" : "+",
+      sign2: this.state.faq === 2 ? "−" : "+", sign3: this.state.faq === 3 ? "−" : "+",
+      toggle0: () => tog(0), toggle1: () => tog(1), toggle2: () => tog(2), toggle3: () => tog(3)
+    };
+  }
+}
+</script>
+</body>
+</html>
