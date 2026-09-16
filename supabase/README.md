@@ -343,11 +343,32 @@ tocan varias filas. Evitar tomar primero el sorteo y luego un boleto: invierte
 el orden del job y de la liberación. Este PR no incorpora el RPC de revisión
 ni resuelve el protocolo de locks/reintentos del futuro panel; M3 sigue abierto.
 
+**Ese orden ya no basta en los rechazos de varias filas.** Con el liberador en
+`BEFORE UPDATE`, un `UPDATE` que rechaza varios boletos del mismo sorteo bloquea
+el sorteo al procesar la primera fila y después espera la siguiente. Si otra
+transacción ya bloqueó uno de esos boletos y luego lo rechaza, respetando el orden
+boletos → sorteos, cada una espera a la otra y PostgreSQL aborta una con
+**`40P01`** (deadlock). Con el trigger `AFTER` anterior, la misma intercalación
+terminaba sin deadlock. No se corrompen datos: la transacción abortada revierte
+estado, auditoría y liberación. El job no entra en ese ciclo porque salta boletos
+bloqueados y pide el sorteo con `NOWAIT`. El panel debe:
+
+- rechazar **un boleto por sentencia**, cada una en su propia transacción (una
+  petición por boleto); dos rechazos seguidos dentro de la misma transacción
+  conservan el lock del sorteo igual que un `UPDATE` múltiple; o bien bloquear
+  primero todos los boletos afectados con `select ... for update order by id` y
+  después ejecutar el `UPDATE` múltiple en esa misma transacción;
+- reintentar la operación completa ante `40P01`, recargando los boletos.
+
 **Límites transitorios sin cambios:** se conserva `statement_timeout = '2min'`
 en el comando del cron. Una cancelación global revierte toda la corrida; no se
 resuelve aquí el caso de livelock ni se garantiza progreso de ese lote. También
 se conserva el presupuesto de **1000 intentos por corrida**, sin rediseñar el
-reparto entre ediciones. **M4 queda fuera de alcance y va en otra rama.**
+reparto entre ediciones.
+
+**M4 queda fuera de alcance y va en otra rama:** sincronizar `docs/arquitectura.md`
+con las migraciones de caducidad. Hoy describe tres migraciones y no incluye
+`ttl_pendientes_horas`, `motivo_rechazo`, las incidencias ni la función de caducidad.
 
 ### Validación ejecutada y comprobaciones adicionales
 
