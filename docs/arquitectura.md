@@ -1044,8 +1044,8 @@ src/
       Reveal.tsx                 // aparición al hacer scroll (texto que sube / foto que gira)
       Photo.tsx                  // imagen_url o el placeholder del prototipo si es null
       MecanicaSection.tsx        // 3 pasos + preview del pase digital
-        DigitalPassPreview.tsx   // código, precio, QR, estado
-      TicketsSection.tsx         // selector de cantidad + quick-picks + total
+        DigitalPassPreview.tsx   // código de ejemplo, precio, trama QR decorativa, estado
+      TicketsSection.tsx         // selector de cantidad + quick-picks + total, o aviso si no hay venta
       TransparenciaSection.tsx   // stats + barra de progreso vendidos/restantes
       GanadoresSection.tsx       // Hall of fame — lista con detalle al hacer hover
       FaqSection.tsx             // acordeón de preguntas frecuentes
@@ -1057,11 +1057,14 @@ src/
     useCountdown.ts              // cuenta regresiva hasta fecha_fin_ventas
     useScrollReveal.ts           // animación de aparición al hacer scroll
     useParallax.ts              // desplazamiento vertical de las fotos
+    useMontoTotal.ts            // preview con calcular_monto_total (no reserva cupo)
+    useMomentoAlcanzado.ts      // true desde una fecha (apertura/cierre de ventas), un solo timer
   lib/
     supabase.ts
   utils/
     currency.ts
     number.ts                   // enteros con separador de miles (es-CO)
+    tickets.ts                  // cupo por compra, máximo comprable y estado de venta
 ```
 
 ## 6. Perfiles: público vs admin
@@ -1276,14 +1279,18 @@ Ya lo revisé. Dos cosas importantes antes del detalle:
 | Header + menú fullscreen | `Header`, `MobileNav` | — (estático) |
 | Hero: badges, countdown, contador de tickets | `HeroSection` | `sorteos.fecha_fin_ventas` (countdown), `tickets_totales`/`tickets_vendidos` (contador, lectura directa) |
 | Premios: 1 mayor + 3 secundarios | `PremiosSection` | `sorteo_premios` filtrado por `tipo` |
-| Mecánica: 3 pasos + pase digital de ejemplo | `MecanicaSection`, `DigitalPassPreview` | `boletos.codigo`, `precio_boleto` |
-| Tickets: selector de cantidad + quick-picks | `TicketsSection` | `calcular_monto_total` (preview) → `comprar_tickets` (al confirmar) |
+| Mecánica: 3 pasos + pase digital de ejemplo | `MecanicaSection`, `DigitalPassPreview` | `precio_boleto`, `ttl_pendientes_horas`, `codigo_prefijo`, `edicion_numero`. El código del pase es de ejemplo (`PD-00000`, fuera de la secuencia real): el público no lee `boletos` |
+| Tickets: selector de cantidad + quick-picks | `TicketsSection` | `calcular_monto_total` (preview de total y gratis); límite con `max_tickets_por_compra`, `tickets_totales`/`tickets_vendidos` y la ventana de ventas. `comprar_tickets` queda para `RegisterFormPage` |
 | Transparencia: stats + barra de progreso | `TransparenciaSection` | `tickets_totales` y `tickets_vendidos` — lectura directa, sin agregación |
 | Ganadores (Hall of fame) | `GanadoresSection` | tabla `ganadores` |
 | FAQ | `FaqSection` | estático por ahora (ver pendiente #2) |
 | Footer | `Footer` | — (estático) |
 
-**Un detalle a resolver con el modelo de "4+1 gratis":** los quick-picks del diseño muestran "3 tickets · $15.000 COP" y "5 tickets · $25.000 COP" — el monto sí coincide con `cantidad_comprada × precio_boleto` (los gratis no cambian el precio, solo la cantidad de tickets recibidos), pero el diseño no comunica el ticket gratis en el botón de 5. Sugerencia: agregar algo como "5 tickets + 1 gratis" en ese botón y mostrar `tickets_gratis` junto al total, para que se entienda la promoción en el momento de comprar.
+**Modelo "4+1 gratis" en Tickets (resuelto):** el diseño mostraba "5 tickets · $25.000 COP" sin comunicar el gratis. Los quick-picks muestran ahora "5 tickets + 1 gratis · $25.000 COP" y bajo el total se detalla "Recibes 6 tickets: 5 comprados + 1 gratis". Montos y gratis salen de `calcular_monto_total`; el cliente solo replica `cantidad + cantidad / 4` para acotar el selector al cupo restante, y `comprar_tickets` vuelve a validarlo.
+
+**Cuándo no se ofrece el selector:** si la edición no abrió ventas, las cerró (o está inactiva) o no le queda cupo para una sola compra, `TicketsSection` muestra un aviso sin selector ni CTA. El máximo por compra es el menor entre `max_tickets_por_compra`, lo que cabe en el cupo restante contando los gratis y el rango de `integer` del monto. Se recalcula con cada refetch del sorteo, y la apertura o el cierre de ventas se aplican a la hora exacta sin recargar. La cuarentena no se refleja: ver pendiente #8.
+
+**Textos del prototipo ajustados al flujo real (sección 3):** el paso 2 prometía "pasarela verificada y confirmación inmediata" y el 3, que el código "llega al instante a tu correo"; la revisión del pago es manual y no se guarda correo. El total decía "un código único por cada participación", pero cada compra genera un solo boleto con un código. El pase decía "Escanea para validar", y no existe validación por QR.
 
 **Campos nuevos que salieron de revisar el diseño** (ya aplicados en la sección 2): `edicion_numero`, `tickets_totales` y `tickets_vendidos` en `sorteos`; `tipo`/`badge_label`/`valor_referencial` en `sorteo_premios` (reemplazando `es_premio_principal`); `codigo` único por boleto (el "pase digital", generado por trigger); tabla `ganadores` nueva para el Hall of fame.
 
@@ -1310,7 +1317,8 @@ Lo más importante primero — el punto donde un sitio de sorteos realmente se r
    - actualizar por `id` **y** `estado = 'pendiente'` y tratar cero filas como conflicto (ganó la caducidad).
 5. **`rechazado` es terminal por diseño.** Un boleto rechazado no se puede reactivar: su cupo ya volvió al contador y puede haberlo tomado otra persona, así que reactivarlo permitiría sobreventa. La red de seguridad contra un rechazo por error del admin va en la UI (`AdminBoletosPage`, con confirmación explícita antes de rechazar), **no en el esquema**. Si el rechazo fue un error, el camino es una compra nueva sujeta a disponibilidad.
 6. **`TicketLookupPage` no tiene camino de consulta todavía.** Buscar solo por número de documento no demuestra identidad y permite enumerar documentos, así que no se expone ningún endpoint público de búsqueda —ni como `select` ni como RPC— hasta decidir el mecanismo: un OTP al teléfono registrado (con límites por IP y destinatario, caducidad corta y respuesta genérica exista o no el documento), o un token de alta entropía entregado al comprar, guardado solo como hash y revocable. No se debe reutilizar el código `PD-00001`, el documento ni el UUID del boleto como credencial. Mientras tanto la ruta `/consulta` queda sin implementar y el índice `idx_boletos_numero_documento` no tiene consumidor.
-7. **`estado`, `tipo_documento`, `tipo` y `motivo_rechazo` salen como `string` en los tipos generados**, no como uniones: en la BD son CHECK constraints, no enums de Postgres, así que `supabase gen types` no puede estrecharlos y `Constants.public.Enums` viene vacío. Hay que decidir entre declarar las uniones a mano en el cliente (rápido, pero se desincroniza del esquema sin avisar) o convertirlos a enums de Postgres en una migración (los tipos generados quedan estrechos y sincronizados, a cambio de que agregar un valor nuevo sea una migración). Además, `src/lib/database.types.ts` todavía no se regeneró tras la caducidad: no incluye `ttl_pendientes_horas`, las columnas nuevas de `boletos`, `incidencias_caducidad` ni `ediciones_en_cuarentena` hasta correr `pnpm types`.
+7. **`estado`, `tipo_documento`, `tipo` y `motivo_rechazo` salen como `string` en los tipos generados**, no como uniones: en la BD son CHECK constraints, no enums de Postgres, así que `supabase gen types` no puede estrecharlos y `Constants.public.Enums` viene vacío. Hay que decidir entre declarar las uniones a mano en el cliente (rápido, pero se desincroniza del esquema sin avisar) o convertirlos a enums de Postgres en una migración (los tipos generados quedan estrechos y sincronizados, a cambio de que agregar un valor nuevo sea una migración). Además, `src/lib/database.types.ts` ya incluye las columnas y objetos de la caducidad; hay que regenerarlo (`pnpm types` sobre una base con todas las migraciones) cada vez que cambie el esquema.
+8. **Venta durante una cuarentena (`P1003`).** La landing no puede saber si una edición está en cuarentena: `ediciones_en_cuarentena` no da `SELECT` a `anon` y una sesión sin admin ve cero filas. Tampoco es una compra imposible: `comprar_tickets` no consulta incidencias y sigue vendiendo. Pero con `P1003` el contador está por debajo de las reservas reales, así que el cupo que ve el público es mayor al verdadero y una compra puede sobrevender. Bloquearlo solo en el frontend no sirve, porque la RPC se invoca directo con la anon key. Hay que decidir en el servidor: que `comprar_tickets` rechace ediciones con una incidencia `P1003` abierta (con un código propio que el frontend muestre como "venta en pausa") y, si se quiere mostrar el estado antes de intentar, exponer solo ese booleano con una función `SECURITY DEFINER`, sin abrir la vista. La contención `55P03` es transitoria y no afecta a los compradores.
 
 ## 10. Setup local
 

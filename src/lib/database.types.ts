@@ -64,8 +64,12 @@ export type Database = {
           id: string
           metodo_pago: string | null
           monto_total: number
+          motivo_corregido_en: string | null
+          motivo_corregido_por: string | null
+          motivo_rechazo: string | null
           nombre_comprador: string
           numero_documento: string
+          pendiente_desde: string | null
           sorteo_id: string
           telefono: string
           tipo_documento: string
@@ -83,8 +87,12 @@ export type Database = {
           id?: string
           metodo_pago?: string | null
           monto_total: number
+          motivo_corregido_en?: string | null
+          motivo_corregido_por?: string | null
+          motivo_rechazo?: string | null
           nombre_comprador: string
           numero_documento: string
+          pendiente_desde?: string | null
           sorteo_id: string
           telefono: string
           tipo_documento: string
@@ -102,8 +110,12 @@ export type Database = {
           id?: string
           metodo_pago?: string | null
           monto_total?: number
+          motivo_corregido_en?: string | null
+          motivo_corregido_por?: string | null
+          motivo_rechazo?: string | null
           nombre_comprador?: string
           numero_documento?: string
+          pendiente_desde?: string | null
           sorteo_id?: string
           telefono?: string
           tipo_documento?: string
@@ -111,6 +123,20 @@ export type Database = {
           validado_por?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "boletos_motivo_corregido_por_fkey"
+            columns: ["motivo_corregido_por"]
+            isOneToOne: false
+            referencedRelation: "admins"
+            referencedColumns: ["user_id"]
+          },
+          {
+            foreignKeyName: "boletos_sorteo_id_fkey"
+            columns: ["sorteo_id"]
+            isOneToOne: false
+            referencedRelation: "ediciones_en_cuarentena"
+            referencedColumns: ["sorteo_id"]
+          },
           {
             foreignKeyName: "boletos_sorteo_id_fkey"
             columns: ["sorteo_id"]
@@ -173,10 +199,50 @@ export type Database = {
             foreignKeyName: "ganadores_sorteo_id_fkey"
             columns: ["sorteo_id"]
             isOneToOne: false
+            referencedRelation: "ediciones_en_cuarentena"
+            referencedColumns: ["sorteo_id"]
+          },
+          {
+            foreignKeyName: "ganadores_sorteo_id_fkey"
+            columns: ["sorteo_id"]
+            isOneToOne: false
             referencedRelation: "sorteos"
             referencedColumns: ["id"]
           },
         ]
+      }
+      incidencias_caducidad: {
+        Row: {
+          boleto_id: string
+          codigo_error: string
+          intentos: number
+          mensaje: string
+          primera_incidencia_en: string
+          registrado_en: string
+          reintentar_desde: string
+          sorteo_id: string
+        }
+        Insert: {
+          boleto_id: string
+          codigo_error: string
+          intentos?: number
+          mensaje: string
+          primera_incidencia_en: string
+          registrado_en: string
+          reintentar_desde: string
+          sorteo_id: string
+        }
+        Update: {
+          boleto_id?: string
+          codigo_error?: string
+          intentos?: number
+          mensaje?: string
+          primera_incidencia_en?: string
+          registrado_en?: string
+          reintentar_desde?: string
+          sorteo_id?: string
+        }
+        Relationships: []
       }
       sorteo_premios: {
         Row: {
@@ -234,6 +300,13 @@ export type Database = {
             foreignKeyName: "sorteo_premios_sorteo_id_fkey"
             columns: ["sorteo_id"]
             isOneToOne: false
+            referencedRelation: "ediciones_en_cuarentena"
+            referencedColumns: ["sorteo_id"]
+          },
+          {
+            foreignKeyName: "sorteo_premios_sorteo_id_fkey"
+            columns: ["sorteo_id"]
+            isOneToOne: false
             referencedRelation: "sorteos"
             referencedColumns: ["id"]
           },
@@ -259,6 +332,7 @@ export type Database = {
           subtitulo: string | null
           tickets_totales: number
           tickets_vendidos: number
+          ttl_pendientes_horas: number
         }
         Insert: {
           activo?: boolean
@@ -279,6 +353,7 @@ export type Database = {
           subtitulo?: string | null
           tickets_totales: number
           tickets_vendidos?: number
+          ttl_pendientes_horas?: number
         }
         Update: {
           activo?: boolean
@@ -299,6 +374,7 @@ export type Database = {
           subtitulo?: string | null
           tickets_totales?: number
           tickets_vendidos?: number
+          ttl_pendientes_horas?: number
         }
         Relationships: [
           {
@@ -319,9 +395,21 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      ediciones_en_cuarentena: {
+        Row: {
+          cuarentena_desde: string | null
+          edicion_numero: number | null
+          motivos: Json | null
+          nombre: string | null
+          reintentar_desde: string | null
+          sorteo_id: string | null
+          ultimo_fallo_en: string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
+      caducar_boletos_pendientes: { Args: never; Returns: number }
       calcular_monto_total: {
         Args: { p_cantidad: number; p_precio_boleto: number }
         Returns: {
@@ -352,8 +440,12 @@ export type Database = {
           id: string
           metodo_pago: string | null
           monto_total: number
+          motivo_corregido_en: string | null
+          motivo_corregido_por: string | null
+          motivo_rechazo: string | null
           nombre_comprador: string
           numero_documento: string
+          pendiente_desde: string | null
           sorteo_id: string
           telefono: string
           tipo_documento: string

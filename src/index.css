@@ -48,6 +48,7 @@
   --shadow-premio-mayor: 18px 22px 0 rgba(123, 74, 226, .22);
   --shadow-premio: 10px 14px 0 rgba(42, 42, 42, .14);
   --shadow-premio-azul: 10px 14px 0 rgba(59, 130, 246, .2);
+  --shadow-pase: 16px 20px 0 rgba(123, 74, 226, .24);
 
   --spacing-lateral: clamp(16px, 4vw, 48px);
   --spacing-seccion: clamp(70px, 11vh, 140px);

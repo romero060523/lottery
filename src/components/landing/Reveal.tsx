@@ -2,7 +2,7 @@ import type { CSSProperties, ReactNode } from 'react'
 import { useScrollReveal } from '../../hooks/useScrollReveal'
 
 type RevealComun = {
-  as?: 'div' | 'span' | 'p' | 'h2'
+  as?: 'div' | 'span' | 'p' | 'h2' | 'li'
   /** Segundos: [opacidad, transform]. El prototipo da a cada propiedad su duración. */
   duracion: readonly [number, number]
   /** Segundos. */
