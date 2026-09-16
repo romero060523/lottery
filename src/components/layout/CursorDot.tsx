@@ -41,7 +41,7 @@ export default function CursorDot() {
       ref={ref}
       aria-hidden="true"
       style={{ transform: 'translate(-100px,-100px)' }}
-      className="pointer-events-none fixed top-0 left-0 z-9500 hidden size-2.5 rounded-full bg-morado [transition:background-color_.4s_var(--ease-pd),width_.25s_var(--ease-pd),height_.25s_var(--ease-pd)] [@media(hover:hover)]:block"
+      className="pointer-events-none fixed top-0 left-0 z-9500 hidden size-2.5 rounded-full bg-morado [transition:background-color_.4s_ease,width_.25s_ease,height_.25s_ease] [@media(hover:hover)]:block"
     />
   )
 }
