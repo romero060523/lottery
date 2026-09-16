@@ -366,15 +366,22 @@ puertos, usando CLI **2.117.0** y la imagen Supabase Postgres **17.6.1.167**:
 
 La base local habitual y el proyecto remoto no recibieron migraciones ni cambios.
 
-`tests/caducidad_regresion.sql` prepara fixtures dentro de una transacción y
-termina con ROLLBACK. Se ejecuta con
-`pnpm supabase test db supabase/tests/caducidad_regresion.sql`. Cubre el huérfano
-de 10 tickets en rechazo manual, rechazo desde validado, UPDATE múltiple sano,
-idempotencia, cron con edición sana/inconsistente, RLS de la vista, antigüedad
-del fallo, validación con rollback, incidencias tardías y rechazo tras conciliación.
-La incidencia tardía se prueba mediante una intercalación simulada; no sustituye
-las comprobaciones con dos sesiones que siguen a continuación. Para ampliar la
-revisión operativa después de aplicar en desarrollo:
+`tests/caducidad_regresion.sql` y `tests/caducidad_contrato.sql` preparan fixtures
+dentro de una transacción y terminan con ROLLBACK; `pnpm supabase test db` ejecuta
+ambos. Cada archivo toma primero el lock advisory del job y reinicia, dentro de su
+transacción, el plazo de los pendientes que ya existían: una compra abandonada en la
+base de desarrollo o una corrida simultánea de cron no alteran los resultados.
+
+`caducidad_regresion.sql` cubre el huérfano de 10 tickets en rechazo manual, rechazo
+desde validado, UPDATE múltiple sano, idempotencia, cron con edición
+sana/inconsistente, RLS de la vista, antigüedad del fallo, validación con rollback,
+incidencias tardías y rechazo tras conciliación. `caducidad_contrato.sql` fija TTL
+1–168, plazo desde cada entrada a pendiente y umbral estricto, autor y motivo de la
+caducidad, `P1002`, corrección auditada del motivo, origen cerrado de service_role,
+aislamiento de un error ordinario de fila, y función y job no expuestos.
+La incidencia tardía se prueba mediante una intercalación simulada; ni ella ni la
+contención `55P03` sustituyen las comprobaciones con dos sesiones que siguen a
+continuación. Para ampliar la revisión operativa después de aplicar en desarrollo:
 
 - Probar pg_cron ausente: error `55000` antes del primer ALTER de caducidad y antes
   de programar; con pg_cron habilitado y permisos, no debe intentarse instalarlo.
