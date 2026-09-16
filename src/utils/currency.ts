@@ -5,7 +5,12 @@ const formatoCOP = new Intl.NumberFormat('es-CO', {
   minimumFractionDigits: 0,
 })
 
-/** formatearCOP(5000) → "$ 5.000" */
+/** formatearCOP(5000) → "$5.000" */
 export function formatearCOP(monto: number): string {
-  return formatoCOP.format(monto)
+  // es-CO separa el símbolo del monto con un espacio duro; el diseño no lo lleva.
+  return formatoCOP
+    .formatToParts(monto)
+    .filter((parte) => !(parte.type === 'literal' && parte.value.trim() === ''))
+    .map((parte) => parte.value)
+    .join('')
 }

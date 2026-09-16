@@ -465,6 +465,7 @@ const formatoCOP = new Intl.NumberFormat('es-CO', {
   minimumFractionDigits: 0,
 });
 // formatoCOP.format(5000) → "$ 5.000"
+// formatearCOP(5000)      → "$5.000"  (quita el espacio duro de es-CO, como en el diseño)
 ```
 
 ## 5. Estructura de carpetas propuesta
