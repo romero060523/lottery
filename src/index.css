@@ -1,1 +1,131 @@
 @import 'tailwindcss';
+
+/* El prototipo es referencia, no código: que el escáner de clases no lo lea. */
+@source not '../docs';
+
+/*
+ * Sistema visual "Purple Draw". Todos los valores salen tal cual del prototipo
+ * (docs/design/purple-draw-landing.html). Las paletas, sombras, curvas y
+ * animaciones por defecto de Tailwind se vacían a propósito: solo existe lo
+ * que el diseño define.
+ */
+@theme static {
+  --color-*: initial;
+  --color-tinta: #2A2A2A;
+  --color-hueso: #E9E8E6;
+  --color-morado: #7B4AE2;
+  --color-coral: #E8604C;
+  --color-amarillo: #F2C230;
+  --color-azul: #3B82F6;
+  --color-parrafo: #4a4845;
+  /* Fotos sin imagen_url */
+  --color-placeholder: #d9d7d3;
+  --color-placeholder-alt: #cfcdc9;
+  --color-placeholder-texto: #6b6862;
+
+  --font-display: 'Anton', Impact, Haettenschweiler, 'Arial Narrow', sans-serif-condensed, sans-serif;
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+
+  /* Una sola curva para el movimiento (transform). Los fundidos de opacidad y
+     color usan `ease`, como en el prototipo; con utilidades transition-* eso
+     es ease-[ease]. */
+  --ease-*: initial;
+  --ease-pd: cubic-bezier(.2, .8, .2, 1);
+  --default-transition-timing-function: var(--ease-pd);
+
+  --animate-*: initial;
+  --animate-pulso: pulso 1.6s ease infinite;
+
+  @keyframes pulso {
+    0%, 100% { opacity: 1; }
+    50% { opacity: .25; }
+  }
+
+  /* Sombras duras, sin blur */
+  --shadow-*: initial;
+  --shadow-foto: 16px 20px 0 rgba(42, 42, 42, .14);
+  --shadow-foto-sm: 10px 12px 0 rgba(42, 42, 42, .12);
+  --shadow-premio-mayor: 18px 22px 0 rgba(123, 74, 226, .22);
+  --shadow-premio: 10px 14px 0 rgba(42, 42, 42, .14);
+  --shadow-premio-azul: 10px 14px 0 rgba(59, 130, 246, .2);
+
+  --spacing-lateral: clamp(16px, 4vw, 48px);
+  --spacing-seccion: clamp(70px, 11vh, 140px);
+
+  /* 760px: corte mobile/desktop del prototipo */
+  --breakpoint-md: 47.5rem;
+}
+
+@layer base {
+  @media (prefers-reduced-motion: no-preference) {
+    html {
+      scroll-behavior: smooth;
+    }
+  }
+
+  body {
+    background-color: var(--color-hueso);
+    color: var(--color-tinta);
+    overflow-x: hidden;
+  }
+
+  a {
+    color: var(--color-morado);
+    text-decoration: none;
+  }
+
+  a:hover {
+    color: var(--color-coral);
+  }
+}
+
+@layer components {
+  /*
+   * Aparición al hacer scroll: <Reveal> + useScrollReveal. Duraciones, retraso,
+   * desplazamiento y rotación llegan por custom properties con los valores que
+   * el prototipo da a cada elemento.
+   */
+  .reveal {
+    opacity: 0;
+    transition:
+      opacity var(--reveal-duracion-opacidad) ease var(--reveal-retraso),
+      transform var(--reveal-duracion-transform) var(--ease-pd) var(--reveal-retraso);
+  }
+
+  .reveal[data-shown] {
+    opacity: 1;
+  }
+
+  .reveal-texto {
+    transform: translateY(var(--reveal-desplazamiento));
+  }
+
+  .reveal-texto[data-shown] {
+    transform: translateY(0);
+  }
+
+  .reveal-foto {
+    transform: scale(.2) rotate(35deg);
+  }
+
+  .reveal-foto[data-shown] {
+    transform: scale(1) rotate(var(--reveal-rotacion));
+  }
+
+  @media (hover: hover) {
+    .reveal-foto[data-shown][data-escala-hover]:hover {
+      transform: scale(1.04) rotate(calc(var(--reveal-rotacion) * .3));
+    }
+  }
+}
+
+/* Títulos calados (Tickets y Footer en el prototipo) */
+@utility texto-outline {
+  color: transparent;
+  -webkit-text-stroke: 1.5px var(--color-hueso);
+}
+
+/* Textura de grano que cubre toda la página */
+@utility grano {
+  background-image: url('data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22180%22 height=%22180%22><filter id=%22n%22><feTurbulence type=%22fractalNoise%22 baseFrequency=%220.9%22 numOctaves=%224%22 stitchTiles=%22stitch%22/></filter><rect width=%22180%22 height=%22180%22 filter=%22url(%23n)%22 opacity=%220.42%22/></svg>');
+}

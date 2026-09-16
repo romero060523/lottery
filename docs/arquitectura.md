@@ -465,6 +465,7 @@ const formatoCOP = new Intl.NumberFormat('es-CO', {
   minimumFractionDigits: 0,
 });
 // formatoCOP.format(5000) → "$ 5.000"
+// formatearCOP(5000)      → "$5.000"  (quita el espacio duro de es-CO, como en el diseño)
 ```
 
 ## 5. Estructura de carpetas propuesta
@@ -489,6 +490,8 @@ src/
       PremiosSection.tsx
         PrizeCardMajor.tsx       // premio "mayor", card grande
         PrizeCardSecondary.tsx   // premios "secundarios" (top pick / bonus), se repite
+      Reveal.tsx                 // aparición al hacer scroll (texto que sube / foto que gira)
+      Photo.tsx                  // imagen_url o el placeholder del prototipo si es null
       MecanicaSection.tsx        // 3 pasos + preview del pase digital
         DigitalPassPreview.tsx   // código, precio, QR, estado
       TicketsSection.tsx         // selector de cantidad + quick-picks + total
@@ -498,13 +501,16 @@ src/
   store/
     useSorteoStore.ts           // Zustand — sorteo seleccionado (equivalente a Pinia)
   hooks/
-    useSorteos.ts               // equivalente al composable useSorteos
+    useSorteos.ts               // equivalente al composable useSorteos (+ useSorteoActual)
+    usePremios.ts               // sorteo_premios de un sorteo, por `orden`
     useCountdown.ts              // cuenta regresiva hasta fecha_fin_ventas
     useScrollReveal.ts           // animación de aparición al hacer scroll
+    useParallax.ts              // desplazamiento vertical de las fotos
   lib/
     supabase.ts
   utils/
     currency.ts
+    number.ts                   // enteros con separador de miles (es-CO)
 ```
 
 ## 6. Perfiles: público vs admin
@@ -697,7 +703,7 @@ components/
 Ya lo revisé. Dos cosas importantes antes del detalle:
 
 - **El diseño confirma el negocio:** es un sorteo temático de BTS ("Gana una Experiencia Purple", disclaimer de no afiliación con HYBE/BIGHIT/BTS en el footer) — el mismo tipo de producto que cincotreboles.com, solo que para Colombia. Todo lo demás ya calza con lo que veníamos armando.
-- **El archivo exportado no es código reutilizable.** Claude Design empaqueta la página en su propio formato interno (bindings `{{ }}`, directivas `sc-if`/`sc-for`, una clase `DCLogic`) — no es React ni HTML plano para copiar. Es una referencia visual y de comportamiento; hay que traducirla a mano a los componentes de React de abajo.
+- **El archivo exportado no es código reutilizable.** Claude Design empaqueta la página en su propio formato interno (bindings `{{ }}`, directivas `sc-if`/`sc-for`, una clase `DCLogic`) — no es React ni HTML plano para copiar. Es una referencia visual y de comportamiento; hay que traducirla a mano a los componentes de React de abajo. Queda versionado en `docs/design/purple-draw-landing.html` (sin su runtime `support.js`, así que no se abre en el navegador: se lee), y los tokens que salen de él viven en el `@theme` de `src/index.css`.
 
 **Secciones de la landing y a qué corresponden:**
 
@@ -724,7 +730,7 @@ Lo más importante primero — el punto donde un sitio de sorteos realmente se r
 1. **Sin sobreventa bajo concurrencia.** `comprar_tickets` (sección 2) reserva con un único `UPDATE ... WHERE tickets_vendidos + incremento <= tickets_totales`. Postgres resuelve esto con un lock de fila breve e implícito — no con un `SELECT FOR UPDATE` de transacción larga ni con un `SUM()` sobre toda la tabla `boletos` en cada compra, que se pondría cada vez más lento a medida que crece la tabla. El lock es por fila de `sorteos`, así que ediciones distintas no se bloquean entre sí; solo se serializan las compras de la *misma* edición, que es exactamente donde se necesita la protección.
 2. **Contador de lectura barata.** `tickets_vendidos` es denormalizado — el Hero y la barra de progreso lo leen directo, sin agregación. Se mantiene consistente con el trigger `liberar_tickets_rechazados`, que lo decrementa si un admin rechaza un pago.
 3. **Índices** en las columnas por las que se filtra seguido: `boletos.sorteo_id`, `boletos.estado` (para `AdminBoletosPage`), `sorteo_id` en `sorteo_premios`/`ganadores`, y `premio_id`/`boleto_id` en `ganadores` para resolver el Hall of fame sin recorrer la tabla. `boletos.numero_documento` también está indexado, pero hoy **no lo usa nadie**: la consulta pública por documento está cerrada hasta decidir el pendiente #6.
-4. **Code-splitting del bundle:** cargar `/admin/*` con `React.lazy` + `Suspense` en vez de en el bundle principal — los visitantes públicos (que son la mayoría del tráfico) no descargan el código del panel admin. Como `@supabase/supabase-js` hoy solo entra por esa rama, también queda fuera del bundle público; eso cambiará en cuanto la landing consuma datos.
+4. **Code-splitting del bundle:** cargar `/admin/*` con `React.lazy` + `Suspense` en vez de en el bundle principal — los visitantes públicos (que son la mayoría del tráfico) no descargan el código del panel admin. `@supabase/supabase-js` ya entra en el bundle público porque la landing lee `sorteos` y `sorteo_premios`; Vite avisa que el chunk principal supera los 500 kB minificados.
 5. **Cacheo:** TanStack Query ya evita refetchear lo mismo en cada render; para las imágenes de premios/banners (que se comparten mucho por WhatsApp), usar las transformaciones de Supabase Storage o un CDN para servir tamaños optimizados en vez de la imagen original completa.
 6. **Protección contra abuso, no solo contra tráfico legítimo:** un sorteo con tickets gratis por volumen es un objetivo típico de bots/scripts. Ya está aplicado el tope por compra (`sorteos.max_tickets_por_compra`, default 50), que impide que una sola llamada a la RPC se lleve todo el cupo restante. Siguen abiertos el captcha (hCaptcha/Turnstile) y la `idempotency_key` por envío para que un doble clic o un reintento de red no genere dos boletos — ver pendiente #3. Ojo: como `comprar_tickets` se puede invocar directamente con la anon key, un captcha puesto solo en el formulario se elude llamando la RPC a mano; tiene que validarse del lado del servidor.
 7. **A futuro, si el tráfico crece mucho:** Supabase Pro ofrece réplicas de lectura y mayor cómputo — no hace falta diseñarlo ahora, pero la separación de la lectura pública (vía RLS de solo-lectura) del resto ya deja el camino libre para eso sin cambios de esquema.

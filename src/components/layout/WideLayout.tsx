@@ -8,9 +8,13 @@ import MobileStickyCta from './MobileStickyCta'
 export default function WideLayout() {
   return (
     <div className="min-h-screen">
+      <div
+        aria-hidden="true"
+        className="grano pointer-events-none fixed inset-0 z-9000 opacity-50 mix-blend-multiply"
+      />
       <CursorDot />
       <Header />
-      <main>
+      <main data-cursor-color="var(--color-morado)" className="relative z-10">
         <Outlet />
       </main>
       <MobileStickyCta />

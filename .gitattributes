@@ -1,0 +1,5 @@
+# LF en el working tree de todas las máquinas. Con core.autocrlf=true (el
+# default de Git para Windows) el checkout deja CRLF, y los archivos que
+# regeneran herramientas con LF (supabase gen types) salen como modificados
+# sin cambios reales.
+* text=auto eol=lf

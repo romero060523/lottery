@@ -31,7 +31,10 @@ export function useCountdown(fechaFin: Date | string | null | undefined): Countd
   useEffect(() => {
     if (timestamp === null) return
 
-    const id = setInterval(() => refrescar((n) => n + 1), 1000)
+    const id = setInterval(() => {
+      refrescar((n) => n + 1)
+      if (Date.now() >= timestamp) clearInterval(id)
+    }, 1000)
     return () => clearInterval(id)
   }, [timestamp])
 
