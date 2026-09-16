@@ -20,6 +20,11 @@ administrativo de migraciones, que puede acceder a las tablas sin RLS.
 5. `migrations/20260916000200_programar_caducidad_pendientes.sql`: validación de
    `pg_cron` ya habilitado y programación cada cinco minutos.
 
+Al agregar o cambiar una migración, actualizar `docs/arquitectura.md` y correr
+`node supabase/scripts/verificar-arquitectura.mjs` antes del PR: compara sentencia por
+sentencia el SQL de la doc con el esquema efectivo de las migraciones (última versión de
+cada función o trigger) y termina con código 1 si falta, sobra o se repite alguna.
+
 `seeds/desarrollo.sql` está fuera de `migrations/`. `[db.seed]` lo carga al terminar
 un `db reset` que haya aplicado correctamente todas las migraciones; `db push`
 no lo incluye por defecto.
