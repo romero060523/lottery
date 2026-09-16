@@ -15,9 +15,9 @@ administrativo de migraciones, que puede acceder a las tablas sin RLS.
 3. `migrations/20260915000300_configurar_rls_y_storage.sql`: permisos explícitos,
    políticas y los dos buckets de Storage.
 4. `migrations/20260916000100_agregar_caducidad_pendientes.sql`: TTL configurable,
-   motivo de rechazo, protección de revisión concurrente y función de caducidad.
-5. `migrations/20260916000200_programar_caducidad_pendientes.sql`: extensión
-   `pg_cron` y ejecución programada cada cinco minutos.
+   inicio de pendiente, motivos corregibles, permisos e incidencias de caducidad.
+5. `migrations/20260916000200_programar_caducidad_pendientes.sql`: validación de
+   `pg_cron` ya habilitado y programación cada cinco minutos.
 
 `seeds/desarrollo.sql` está fuera de `migrations/` y no se ejecuta automáticamente.
 Es exclusivamente para desarrollo: crea un sorteo activo con precio de **5000 COP**,
@@ -80,37 +80,85 @@ solamente en el formulario podría eludirse.
 
 ## Caducidad de pendientes
 
-`sorteos.ttl_pendientes_horas` es un entero positivo, obligatorio y configurable
+### Requisito manual: habilitar Cron
+
+Antes de aplicar cualquiera de las dos migraciones de caducidad, Andy debe abrir
+**Dashboard > Integrations > Cron** en el proyecto y habilitar `pg_cron`. La
+instalación de esa extensión no trusted requiere privilegios que el rol `postgres`
+de Supabase no tiene: las migraciones no ejecutan `CREATE EXTENSION`.
+La [guía oficial de instalación](https://supabase.com/docs/guides/cron/install)
+describe el paso desde el Dashboard.
+
+La primera migración comprueba la extensión y los permisos de uso/planificación
+**antes de alterar tablas**; la segunda repite la comprobación antes de crear el
+job. Si falta la extensión, fallan con SQLSTATE `55000` e instrucciones para
+habilitarla; si faltan permisos, con `42501`. No se omite silenciosamente el job.
+Una vez habilitada, Andy reintenta las migraciones. En desarrollo local debe
+preparar la extensión mediante Studio o un administrador del Postgres local,
+fuera de estas migraciones, y comprobar el requisito después de reconstruir la
+base. Un `db reset`/`db push` sin ese requisito se detiene con el mismo mensaje.
+
+### Plazo desde cada entrada a pendiente
+
+`sorteos.ttl_pendientes_horas` es un entero entre **1 y 168 horas**, obligatorio y configurable
 por edición, con **24 horas** como valor predeterminado. Un día deja margen para
 pagar por Nequi, enviar el comprobante y revisar manualmente una compra hecha por
 la noche, sin reservar cupo indefinidamente. Es una propuesta operativa: el admin
-debe aumentarlo si su horario de revisión no permite atender dentro de ese plazo.
+puede ampliarlo hasta una semana para cubrir su horario de revisión y fines de semana.
 Los permisos de columna admiten INSERT/UPDATE del TTL solo bajo la política admin;
 la auditoría de configuración existente registra quién lo cambia.
 
-Se mide desde `boletos.created_at`, con tiempos `timestamptz`, y solo se caduca
-cuando la antigüedad es **mayor** que el TTL. Cada ejecución usa el TTL del sorteo
-visible en su consulta, también para reservas ya existentes: reducirlo puede
-caducarlas en la siguiente ejecución; aumentarlo les da más tiempo, pero nunca
-reactiva rechazados. No se guarda un vencimiento fijo por boleto ni se reinicia
-el plazo al volver de `validado` a `pendiente`. Un cambio del TTL mientras corre
-un lote se observa en la siguiente ejecución. También se procesan sorteos cerrados
-o inactivos, pues sus reservas siguen reteniendo cupo.
+El plazo se mide desde **`boletos.pendiente_desde`**, que el trigger asigna al
+insertar un pendiente o al volver de `validado` a `pendiente`. Esa vuelta concede
+un TTL completo, incluso si la compra se creó hace meses. Guardar de nuevo un
+pendiente sin cambiar su estado conserva el inicio. Al salir de pendiente se
+limpia la fecha; `created_at` conserva la fecha original de compra. La API no
+puede escribir `pendiente_desde`. Caducidad, entradas a pendiente, revisiones,
+correcciones e incidencias usan **`statement_timestamp()`** y `timestamptz`.
+
+Como los pendientes anteriores no registraban su última entrada a ese estado,
+reciben un plazo completo desde la migración. No se infiere esa fecha de
+`created_at`. La caducidad exige antigüedad estrictamente mayor que el TTL.
+El job vuelve a comprobar el TTL después de bloquear el sorteo: reducirlo afecta
+pendientes existentes; aumentarlo extiende su margen, sin reactivar rechazados.
+También se procesan sorteos cerrados o inactivos.
 
 El job `caducar-boletos-pendientes` ejecuta `caducar_boletos_pendientes()` con
 `*/5 * * * *`. Cinco minutos son un intervalo pequeño frente a 24 horas y evitan
-trabajo por segundo: 288 ejecuciones diarias. Cada llamada procesa hasta **1000
-boletos**, prioriza los más antiguos y usa un índice parcial de pendientes para
-no recorrer el historial de revisados. Sin acumulación, bloqueos o fallos, la
+trabajo por segundo: 288 ejecuciones diarias. Cada llamada intenta hasta **1000
+boletos**, agrupados por sorteo y ordenados por `pendiente_desde` dentro de cada
+uno. Examina hasta 1000 candidatos por sorteo; los boletos bloqueados se saltan
+sin consumir el presupuesto de intentos de los demás sorteos. Un índice parcial
+cubre sorteo, inicio e ID de pendientes. Sin acumulación, bloqueos o fallos, la
 liberación sucede en la siguiente ejecución después de vencer; no se promete un
 máximo estricto de cinco minutos. Un atraso mayor requiere varios lotes.
 
-El job usa `lock_timeout = '5s'` y `statement_timeout = '30s'` para acotar esperas
-y duración. Un fallo revierte el lote completo y el siguiente intervalo vuelve
-a intentarlo. Si falla la comprobación del contador del trigger, la caducidad
-tampoco queda confirmada: Andy debe revisar esa inconsistencia. No se ocultan errores.
-`pg_cron` se habilita con `IF NOT EXISTS`; el nombre estable del job permite
-reprogramarlo con `cron.schedule` sin duplicarlo para el mismo propietario.
+Cada fila se procesa en un bloque PL/pgSQL con `EXCEPTION`: un error revierte
+solo esa fila y sus triggers, según la [semántica de excepciones de PostgreSQL](https://www.postgresql.org/docs/17/plpgsql-control-structures.html#PLPGSQL-ERROR-TRAPPING).
+Se conserva el trabajo de las demás al confirmar
+la llamada. La incidencia se guarda en `incidencias_caducidad` con IDs, SQLSTATE,
+mensaje, fecha, intentos y próximo reintento. La fila fallida se aplaza **una hora**,
+para que no monopolice los lotes. Un bloqueo advisory transaccional evita dos
+ejecuciones simultáneas de la función, incluso si se invoca manualmente.
+
+El job toma primero el boleto con `FOR UPDATE SKIP LOCKED` y luego el sorteo con
+`FOR NO KEY UPDATE NOWAIT`. Ante contención (`55P03`, incluido `lock_timeout`),
+abandona ese sorteo y continúa con el siguiente; aplaza el sorteo **diez minutos**.
+No espera cinco segundos por cada boleto de la edición bloqueada. La tabla de
+incidencias no tiene claves foráneas: registrar el fallo no debe esperar un lock
+del mismo sorteo/boleto que lo causó. Sus escrituras quedan reservadas al rol
+administrativo del job; los admins autenticados tienen lectura mediante RLS.
+
+El comando mantiene `lock_timeout = '5s'` como límite de esperas no evitadas y
+`statement_timeout = '2min'` como límite de emergencia. Una cancelación global,
+desconexión o fallo del propio registro de incidencias todavía revierte la llamada;
+los errores ordinarios de fila y la contención de sorteos se aíslan. Los errores
+capturados se consultan en `incidencias_caducidad`; el job puede figurar como
+exitoso en `cron.job_run_details` habiendo procesado otros boletos sanos.
+
+El nombre estable del job permite reprogramarlo con `cron.schedule` para el mismo
+propietario: su [implementación](https://github.com/citusdata/pg_cron/blob/v1.6.5/src/job_metadata.c#L229-L237)
+actualiza horario y comando ante conflicto de nombre/usuario.
 La ejecución corre con el rol que aplica la migración, que debe ser el rol
 administrativo de Supabase con acceso a las tablas y a `cron`. La función usa
 `SECURITY INVOKER`, búsqueda vacía y referencias calificadas: no necesita elevar
@@ -128,26 +176,52 @@ Estas propiedades del planificador están documentadas en
 | `servicio` | Identificador del servicio | Otro proceso confiable, por ejemplo OCR |
 | `null` | Según estado | Boleto pendiente o validado, sin rechazo |
 
-`registrar_revision_boleto` calcula el motivo, autor y fecha de revisión en el
-servidor; el navegador no tiene permiso de escribir `motivo_rechazo`. Intentar
+`registrar_revision_boleto` calcula el motivo, autor y fecha del rechazo inicial.
+Un admin autenticado puede **corregir `motivo_rechazo` sin cambiar el estado**;
+el servidor registra `motivo_corregido_por` y `motivo_corregido_en` de la última
+corrección. Se conservan `validado_por` y `validado_en` como autor y fecha del
+rechazo original, y no se toca el contador. Valores inválidos fallan explícitamente.
+Usuarios comunes y service_role no pueden corregir el motivo. Intentar
 enviar el identificador de caducidad como admin sigue registrando un rechazo
-manual. Sin cambio de estado se preservan motivo y auditoría anteriores. Los
+manual. Repetir el mismo motivo no reescribe la auditoría de corrección. Los
 rechazados históricos se clasifican como manuales cuando su autor empieza por
 `admin:`; los demás quedan como `servicio`, sin inventar caducidades anteriores.
 Ese relleno no cambia estados, fechas, autores ni contadores.
 
-La tarea solo cambia `pendiente` a `rechazado` y asigna su identificador de sistema.
+**Origen cerrado:** service_role pierde INSERT, DELETE, TRUNCATE y la escritura
+general de boletos. Conserva SELECT y UPDATE de estado/autor/fecha de revisión,
+método de pago y comprobante. Para crear una compra, también la futura Edge
+Function debe llamar a `comprar_tickets`, cuyo SECURITY DEFINER reserva e inserta
+atómicamente; la Edge Function de Nequi solo actualiza el pago/revisión de ese
+boleto. Tampoco puede alterar cantidades, sorteo ni el inicio de pendiente.
+
+Se elige revocar el INSERT directo porque `comprar_tickets` ya ofrece una única
+vía de reserva atómica; no hace falta agregar una segunda forma de registrar
+reservas. Para datos históricos posiblemente corruptos, el job bloquea el sorteo
+y compara su contador con la suma de comprados más gratis de pendientes y
+validados, antes de caducar la primera fila de esa edición. Un desajuste produce
+**`P1003`**: registra una incidencia, aplaza el sorteo una hora y sigue con otros.
+La fila anotada es la candidata que detectó el desajuste; no identifica por sí
+sola al boleto sin reserva. Sin procedencia histórica no puede determinarse cuál
+reserva es legítima: esa edición requiere conciliación manual. El job no resta
+cupos de ella ni modifica automáticamente su contador. Esto protege también el
+caso de un boleto sin reserva cuyo importe en tickets cabe en el contador ajeno.
+La suma se ejecuta en el job, una vez por sorteo comprobado, y no agrega trabajo
+a cada compra. Tras un fallo de fila se vuelve a comprobar antes de continuar.
+
+Tras esa comprobación, la tarea cambia `pendiente` a `rechazado` y asigna su identificador de sistema.
 **No modifica `tickets_vendidos`, no llama directamente al liberador ni desactiva
 triggers.** El trigger existente `liberar_tickets_rechazados` sigue siendo la única
 vía que resta `old.cantidad_total`, incluidos los gratis. Rechazo, motivo, auditoría
-y liberación se confirman en la misma transacción. Repetir la tarea no selecciona
+y liberación se confirman juntos para cada fila exitosa. Una excepción revierte
+los cambios de esa fila, incluidos los del trigger, y permite continuar. Repetir la tarea no selecciona
 rechazados y repetir el rechazo tampoco libera de nuevo. El estado sigue terminal.
 
 ### Revisión simultánea del admin
 
-Abrir un boleto en el panel no lo bloquea ni extiende el plazo. La tarea selecciona
-filas con `FOR UPDATE OF boletos SKIP LOCKED`: salta las que otra transacción está
-editando y las vuelve a considerar en ejecuciones posteriores. Esta es la semántica
+Abrir un boleto en el panel no lo bloquea ni extiende el plazo. La tarea bloquea
+cada fila dentro de su bloque de errores con `FOR UPDATE SKIP LOCKED`: salta las
+que otra transacción está editando y las considera después. Esta es la semántica
 de [bloqueos de filas de PostgreSQL](https://www.postgresql.org/docs/17/sql-select.html#SQL-FOR-UPDATE-SHARE).
 
 - Si el admin guarda la validación primero y confirma su transacción, el boleto
@@ -167,14 +241,25 @@ filas; si se intenta reactivar directamente sin el filtro, se recibe `P1002`.
 Un segundo rechazo sin filtro es idempotente y conserva el motivo de caducidad.
 La integración del panel y la regeneración de tipos quedan fuera de esta entrega.
 
+**M3 pendiente para quien construya el panel:** las operaciones multisentencia
+deben respetar el orden **boletos → sorteos**, con un orden estable de IDs si
+tocan varias filas. Evitar tomar primero el sorteo y luego un boleto: invierte
+el orden del job y de la liberación. Este PR no incorpora el RPC de revisión
+ni resuelve el protocolo de locks/reintentos del futuro panel; M3 sigue abierto.
+
 ### Comprobaciones de caducidad para Andy
 
 No se aplicaron estas migraciones ni se ejecutó el job durante su preparación.
 Después de aplicarlas en desarrollo con el rol administrativo:
 
+- Probar pg_cron ausente: error `55000` antes del primer ALTER de caducidad y antes
+  de programar; con pg_cron habilitado y permisos, no debe intentarse instalarlo.
+  Probar TTL 0, 1, 168 y 169; solo 1–168 es válido.
 - Probar dos sorteos con TTL distintos, pendientes por debajo/en el umbral/por
   encima de él, y boletos ya validados o rechazados; solo caducan los pendientes
-  con antigüedad mayor. Verificar también sorteos inactivos y cambios del TTL.
+  con antigüedad mayor desde `pendiente_desde`. Verificar también sorteos inactivos
+  y cambios del TTL. Volver a pendiente una compra validada de hace varios días:
+  debe recibir un plazo completo; guardar nuevamente pendiente no debe reiniciarlo.
 - Confirmar motivo `caducidad`, autor `sistema:caducidad`, fecha de revisión y
   disminución exacta de comprados más gratis. Repetir la tarea y el rechazo; el
   contador y la auditoría deben permanecer iguales. Validar la clasificación de
@@ -182,16 +267,34 @@ Después de aplicarlas en desarrollo con el rol administrativo:
 - En dos sesiones, mantener abierta una transacción de revisión y ejecutar el
   job: debe saltar el boleto bloqueado. Repetir invirtiendo el orden y verificar
   `P1002` o cero filas según el filtro; probar también ROLLBACK de cada operación.
-- Crear más de 1000 pendientes vencidos: comprobar lotes sucesivos y que cada
-  boleto libera una vez. Simular un fallo del contador y verificar que revierte
-  todo el lote, sin dejar rechazos confirmados ni cupos parcialmente liberados.
+- Como service_role, INSERT directo debe fallar con permisos insuficientes;
+  comprar por RPC y actualizar pago/estado deben funcionar. DELETE, TRUNCATE y
+  cambios de cantidad, sorteo o inicio deben fallar.
+- Preparar una fila problemática por una vía privilegiada en desarrollo y un
+  sorteo sano. Repetir el job tres veces: el sano libera y el problemático registra
+  su incidencia/reintento. Con un boleto sin reserva de 10 y un contador de 10
+  perteneciente a otros boletos, debe aparecer `P1003` sin descontar esos 10.
+- Forzar un error de trigger en una sola fila con contador consistente: otras
+  filas del mismo sorteo deben continuar y el fallo quedar aplazado. Crear más de
+  1000 vencidos y verificar lotes sucesivos sin doble liberación.
+- En otra sesión mantener bloqueado un sorteo; el job debe registrar `55P03`,
+  saltar esa edición y liberar la sana en la misma ejecución. Verificar que el
+  registro de la incidencia no espera por una FK al sorteo bloqueado.
+  Repetir bloqueando 1000 boletos de una edición: las filas omitidas no deben
+  consumir el presupuesto e impedir la caducidad de otra edición sana.
+- Como admin, corregir motivo de un rechazado: debe persistir el motivo, conservar
+  autor/fecha originales, registrar corrector/fecha y no variar el cupo. Repetirlo,
+  intentar valor inválido y corregir como usuario común/service_role.
 - Comprobar que anon, un usuario común, un admin por API y service_role no pueden
   ejecutar la función. Los admins pueden editar TTL y leer motivos mediante sus
-  permisos existentes, pero no sobrescribir motivos ni reactivar rechazados.
+  permisos existentes y corregir motivos con auditoría; no pueden reactivar rechazados.
 - Revisar `cron.job` y `cron.job_run_details`: un único job con el nombre indicado,
   periodicidad y rol correctos, ejecuciones exitosas y fallos visibles. Si el
   proyecto está pausado o cron detenido, los pendientes conservan el cupo hasta
-  que se reanuden las ejecuciones; el lote procesa los vencidos acumulados.
+  que se reanuden las ejecuciones. Consultar también `incidencias_caducidad`:
+  reparar la causa por una vía administrativa y esperar el reintento o eliminar
+  la incidencia mediante SQL administrativo para adelantarlo. Los contadores
+  inconsistentes requieren conciliación de reservas antes de reintentar.
 
 La instalación y monitorización se basan en la
 [documentación de Supabase Cron](https://supabase.com/docs/guides/cron).
@@ -213,7 +316,7 @@ los permisos públicos y **no se crea ninguna política de lectura pública**, n
 siquiera filtrada por documento. `boletos_select_admin` permite leer todas las
 filas a usuarios autenticados presentes en `admins`, cubriendo `AdminBoletosPage`.
 La política de actualización exige la misma pertenencia y los permisos de columna
-solo admiten `estado`, `validado_por` y `validado_en`. No hay INSERT ni DELETE
+admiten `estado`, `validado_por`, `validado_en` y corrección auditada de `motivo_rechazo`. No hay INSERT ni DELETE
 directo desde el navegador: así tampoco se elude o desajusta la reserva de cupos.
 Los administradores utilizan la misma RPC si necesitan registrar una compra.
 
