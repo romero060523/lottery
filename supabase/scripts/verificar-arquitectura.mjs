@@ -81,9 +81,11 @@ function normalizar(sentencia) {
     .trim()
     .toLowerCase()
     .replace(/^create or replace function/, 'create function')
+    .replace(/^create or replace view/, 'create view')
 }
 
 const nombreFuncion = (s) => /^create function ([\w.]+)\(/.exec(s)?.[1]
+const nombreVista = (s) => /^create view ([\w.]+)/.exec(s)?.[1]
 const nombreTrigger = (s) => /^create trigger (\w+)/.exec(s)?.[1]
 const triggerEliminado = (s) => /^drop trigger (\w+)/.exec(s)?.[1]
 
@@ -94,6 +96,9 @@ for (const archivo of migraciones) {
   for (const s of sentencias(readFileSync(join(carpetaMigraciones, archivo), 'utf8'))) {
     const funcion = nombreFuncion(s)
     if (funcion) efectivo = efectivo.filter((e) => nombreFuncion(e.s) !== funcion)
+
+    const vista = nombreVista(s)
+    if (vista) efectivo = efectivo.filter((e) => nombreVista(e.s) !== vista)
 
     const eliminado = triggerEliminado(s)
     if (eliminado) {
