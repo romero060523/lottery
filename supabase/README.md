@@ -366,9 +366,9 @@ resuelve aquí el caso de livelock ni se garantiza progreso de ese lote. Tambié
 se conserva el presupuesto de **1000 intentos por corrida**, sin rediseñar el
 reparto entre ediciones.
 
-**M4 queda fuera de alcance y va en otra rama:** sincronizar `docs/arquitectura.md`
-con las migraciones de caducidad. Hoy describe tres migraciones y no incluye
-`ttl_pendientes_horas`, `motivo_rechazo`, las incidencias ni la función de caducidad.
+**M4 resuelto:** `docs/arquitectura.md` ya describe las cinco migraciones, incluida la
+caducidad (columnas, constraints, permisos, incidencias, vista, job y liberador en
+`BEFORE`), y recoge M3 en sus pendientes.
 
 ### Validación ejecutada y comprobaciones adicionales
 
