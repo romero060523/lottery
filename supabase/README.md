@@ -19,6 +19,8 @@ administrativo de migraciones, que puede acceder a las tablas sin RLS.
    inicio de pendiente, motivos corregibles, permisos e incidencias de caducidad.
 5. `migrations/20260916000200_programar_caducidad_pendientes.sql`: validación de
    `pg_cron` ya habilitado y programación cada cinco minutos.
+6. `migrations/20260916000300_bloquear_venta_en_cuarentena.sql`: pausa persistente
+   por edición, bloqueo de compras/revisiones y conciliación administrativa auditada.
 
 Al agregar o cambiar una migración, actualizar `docs/arquitectura.md` y correr
 `node supabase/scripts/verificar-arquitectura.mjs` antes del PR: compara sentencia por
@@ -41,8 +43,9 @@ El navegador puede ejecutar `comprar_tickets` con la anon key. La función es
 `SECURITY DEFINER` porque reserva cupo y crea un boleto aunque ese llamador no
 tenga permisos de escritura sobre las tablas. Usa `search_path = ''`, referencias
 calificadas por esquema y ninguna sentencia SQL dinámica. Se revoca la ejecución
-implícita de `PUBLIC` y solo se habilitan las tres RPC de compra/cálculo para
-`anon`, `authenticated` y el servicio. Los triggers no se exponen como RPC.
+implícita de `PUBLIC` y se habilitan las tres RPC de compra/cálculo y el booleano
+`sorteo_en_cuarentena` para `anon`, `authenticated` y el servicio. Los triggers no
+se exponen como RPC.
 
 Antes de escribir se comprueban cantidad positiva, valores nulos, tipo de documento,
 longitudes de nombre (1–200), teléfono y documento (1–32), sorteo activo, ventana
@@ -65,13 +68,22 @@ del sorteo habilitado para distinguir el error:
 
 | `error.code` de la RPC | Significado |
 | --- | --- |
+| `P1004` | La edición activa tiene una pausa persistente causada por `P1003`; la venta sigue cerrada hasta conciliar. |
 | `P1001` | La cantidad comprada supera `max_tickets_por_compra`; el mensaje incluye el máximo. |
 | `P0001` | No hay cupo, la venta no está habilitada o el monto excede el rango admitido. |
 
 El frontend puede discriminar por código sin interpretar el texto del mensaje.
 Superar el tope no crea boletos ni modifica el contador.
 
-La reserva usa un `UPDATE` condicionado por capacidad, incluidos los tickets gratis.
+La compra bloquea brevemente la fila del sorteo y consulta la pausa ya confirmada
+antes de reservar. El lock mantiene estable el contador frente a otros escritores,
+pero MVCC no hace visible una detección que otra transacción todavía no confirmó.
+El job registra la pausa persistente sin lanzar excepción, así que conserva el lock
+del sorteo hasta su commit: una compra que llega durante la detección espera y recibe
+`P1004`. Si esa espera supera el `statement_timeout` del rol (3 s para `anon`), la
+compra falla por timeout y tampoco vende. Si la compra tomó el lock primero, ese
+intento del job registra `55P03` y la detección queda para el reintento. La reserva
+usa un `UPDATE` condicionado por capacidad, incluidos los tickets gratis.
 La creación del boleto pertenece a la misma transacción: si falla, la reserva se
 revierte. Los productos y sumas intermedios usan `bigint` para detectar desbordamientos;
 las columnas monetarias y los resultados continúan siendo `integer` en COP.
@@ -212,39 +224,71 @@ exitoso en `cron.job_run_details` habiendo procesado otros boletos sanos.
 
 ### Consulta admin de cuarentenas y resolución de incidencias
 
-`public.ediciones_en_cuarentena` entrega una fila por edición con incidencias
-abiertas de contador (`P1003`) o contención (`55P03`). Expone `sorteo_id`,
-`edicion_numero`, `nombre`, `cuarentena_desde`, `ultimo_fallo_en`,
-`reintentar_desde` y `motivos` (JSON con boleto, código, mensaje, inicio e intentos).
-`primera_incidencia_en` conserva el primer fallo de la misma causa en los
-reintentos; `registrado_en` registra el último. Si cambia el código, comienza
-un nuevo intervalo para esa causa. Una fecha de reintento vencida significa que
-el job puede volver a intentarlo, no que la incidencia esté resuelta: sigue visible.
+`public.cuarentenas_sorteo` guarda la pausa como una fila por edición. Nace al
+confirmar un descuadre `P1003` y conserva motivo, primera detección, última
+verificación y número de verificaciones. No depende del estado del boleto marcado
+ni del último código en `incidencias_caducidad`: validar ese boleto o reemplazar su
+diagnóstico por `55P03` no reabre la venta.
+
+`public.ediciones_en_cuarentena` expone al panel `sorteo_id`, `edicion_numero`,
+`nombre`, `cuarentena_desde`, `ultimo_fallo_en` y `motivos`. Mantiene
+`reintentar_desde` como `null` por compatibilidad; el plazo de cada intento sigue en
+`incidencias_caducidad`. La vista usa `security_invoker = true`: un admin ve también
+ediciones inactivas, una sesión sin admin obtiene cero filas y `anon` carece de
+SELECT. El admin tampoco puede editar o borrar la pausa directamente. **Cambio de
+contrato:** la vista ya no lista ediciones que solo tienen contención `55P03` (no
+están en pausa) y `motivos` trae `boleto_id` en `null`; ese detalle, los reintentos y
+la contención se consultan en `incidencias_caducidad`.
 
 ```sql
 select * from public.ediciones_en_cuarentena order by cuarentena_desde;
 ```
 
-La vista usa `security_invoker = true` y los permisos/RLS de sus tablas: un
-admin autenticado ve también ediciones inactivas; una sesión sin admin obtiene
-cero filas y `anon` carece de SELECT. No expone datos personales ni concede
-escritura. La UI y sus alertas quedan para el panel; consultar solo el resultado
-del cron o el número de caducados no basta para detectar una cuarentena.
+La RPC `sorteo_en_cuarentena(uuid)` da al cliente público únicamente el booleano
+necesario para pausar la compra. Es `SECURITY DEFINER`, usa `search_path = ''` y
+devuelve `true` solo si la edición está activa y tiene una fila en
+`cuarentenas_sorteo`. No expone código, mensaje, boleto, fechas ni intentos. Para
+una edición inactiva devuelve `false`, aunque el UUID sea conocido públicamente.
 
-Al guardar `validado` o `rechazado`, un trigger elimina la incidencia de ese
-boleto dentro de la misma transacción, también en la revisión manual o del
-servicio. Un error o ROLLBACK restaura tanto estado como incidencia. El admin
-no recibe DELETE ni una RPC privilegiada para saltarse una cuarentena pendiente.
-El job limpia incidencias de boletos ya revisados o inexistentes, saltando las
-incidencias bloqueadas; además, tanto la selección de ediciones como la vista
-ignoran registros cuyo boleto ya no esté pendiente. Esto cubre una incidencia
-registrada después de una validación concurrente.
+`comprar_tickets` consulta ese booleano con la fila del sorteo bloqueada y lanza
+`P1004` antes de modificar el contador o crear el boleto. El código permite al
+frontend mostrar “venta en pausa” de forma distinta de `P1001` (tope) y `P0001`
+(cupo o ventana). La protección vive en la RPC y también cubre llamadas directas
+con la anon key.
 
-Resolver la incidencia de un boleto **no concilia el contador**: si la edición
-sigue inconsistente, la siguiente reserva vencida vuelve a producir `P1003`, sin
-esperar el aplazamiento del boleto validado. Las incidencias de otras reservas
-pendientes permanecen. La tabla representa incidencias abiertas, no un historial
-permanente de resoluciones; la auditoría de la revisión queda en `boletos`.
+### Conciliación administrativa y orden obligatorio
+
+El admin autenticado dispone de `conciliar_contador_sorteo(uuid)`. La RPC comprueba
+la whitelist de `admins`, bloquea la fila del sorteo, suma tickets pendientes y
+validados, y ajusta `tickets_vendidos` a ese valor. Si la suma supera
+`tickets_totales`, devuelve **`P1005`** sin modificar nada. Una conciliación exitosa
+registra contador anterior, nuevo, admin y fecha en `conciliaciones_sorteo`; después
+elimina los diagnósticos `P1003` y la pausa en la misma transacción. `anon`, usuarios
+comunes y `service_role` no pueden usarla; los admins pueden consultar la auditoría
+por RLS. Es la única vía auditada: el admin no escribe `tickets_vendidos` ni borra
+incidencias o pausas. **Limitación abierta:** `service_role` conserva el `grant all`
+sobre `sorteos` de la tercera migración, así que la clave de servicio todavía puede
+escribir `tickets_vendidos` sin auditoría. No puede borrar la pausa, pero si iguala el
+contador a las reservas, el siguiente job que verifique la edición la levanta. Cerrarlo
+exige restringir ese grant por columnas y es una decisión aparte.
+
+**Orden obligatorio: conciliar antes de validar.** Mientras exista la pausa, validar un
+boleto o devolverlo a `pendiente` devuelve **`P1006`** (trigger
+`bloquear_validacion_en_cuarentena`). Validar primero aceptaría una reserva que el
+contador no reconoce, quizá por encima de la capacidad.
+
+**Rechazar sí se permite durante la pausa**, y es la salida de una edición sobrevendida:
+si la conciliación responde `P1005`, el admin rechaza las reservas que no se honrarán
+hasta que las restantes quepan en `tickets_totales` y vuelve a conciliar. Ese rechazo no
+aplica la guarda `P1003` ni descuenta del contador, que no es confiable en pausa: la
+conciliación lo recalcula desde las reservas. El liberador toma el lock del sorteo antes
+de mirar la pausa, así que un rechazo concurrente con una conciliación espera su commit
+y descuenta normalmente. La venta sigue pausada durante todo el proceso.
+
+Ni validar ni rechazar el boleto marcado levantan la pausa. Las incidencias `P1003` de
+boletos ya revisados se conservan como evidencia hasta que el job verifique igualdad o
+la conciliación las resuelva. Una edición en pausa sin pendientes vencidos no se vuelve a
+verificar: queda pausada hasta conciliar.
 
 El nombre estable del job permite reprogramarlo con `cron.schedule` para el mismo
 propietario: su [implementación](https://github.com/citusdata/pg_cron/blob/v1.6.5/src/job_metadata.c#L229-L237)
@@ -290,13 +334,18 @@ vía de reserva atómica; no hace falta agregar una segunda forma de registrar
 reservas. Para datos históricos posiblemente corruptos, el job bloquea el sorteo
 y compara su contador con la suma de comprados más gratis de pendientes y
 validados, antes de caducar la primera fila de esa edición. Un desajuste produce
-**`P1003`**: registra una incidencia, aplaza el sorteo una hora y sigue con otros.
+**`P1003`**: registra una incidencia, crea o actualiza `cuarentenas_sorteo`, aplaza
+el sorteo una hora y sigue con otros. La pausa se escribe mientras el job conserva
+el lock del sorteo; una compra que llega después espera y observa la pausa confirmada.
 La fila anotada es la candidata que detectó el desajuste; no identifica por sí
 sola al boleto sin reserva. Sin procedencia histórica no puede determinarse cuál
 reserva es legítima: esa edición requiere conciliación manual. El job no resta
 cupos de ella ni modifica automáticamente su contador. Esto protege también el
 caso de un boleto sin reserva cuyo importe en tickets cabe en el contador ajeno.
 El job hace una comprobación inicial por sorteo y la repite tras un fallo de fila.
+Si una ejecución posterior verifica igualdad, elimina la pausa antes de procesar;
+un fallo posterior de esa fila revierte también la limpieza. Un `55P03` puede
+reemplazar el diagnóstico del boleto, pero nunca elimina `cuarentenas_sorteo`.
 Además, `liberar_tickets_rechazados` aplica la misma guarda **en cada rechazo**,
 manual, de servicio o de caducidad, con el contador bloqueado. Un desajuste lanza
 `P1003` y revierte estado, auditoría y liberación: que la cantidad quepa en el
@@ -307,8 +356,9 @@ actual, y las filas previas de un UPDATE múltiple ya reflejan su liberación. U
 trigger AFTER por fila vería todos los estados nuevos antes de haber restado todos
 los cupos y daría falsos desajustes. Esta [visibilidad de triggers](https://www.postgresql.org/docs/17/trigger-datachanges.html)
 permite rechazar varias reservas sanas en una sentencia y conservar la atomicidad.
-La suma por rechazo agrega costo también al job; no se agrega ninguna suma a
-`comprar_tickets` ni se modifica su camino de reserva.
+La suma por rechazo agrega costo también al job; `comprar_tickets` no calcula esa
+suma. Solo comprueba con `EXISTS` por la clave de `cuarentenas_sorteo` si la edición
+activa está pausada antes de seguir por el camino normal de reserva.
 
 Tras esa comprobación, la tarea cambia `pendiente` a `rechazado` y asigna su identificador de sistema.
 **No modifica `tickets_vendidos`, no llama directamente al liberador ni desactiva
@@ -371,7 +421,7 @@ resuelve aquí el caso de livelock ni se garantiza progreso de ese lote. Tambié
 se conserva el presupuesto de **1000 intentos por corrida**, sin rediseñar el
 reparto entre ediciones.
 
-**M4 resuelto:** `docs/arquitectura.md` ya describe las cinco migraciones, incluida la
+**M4 resuelto:** `docs/arquitectura.md` ya describe las seis migraciones, incluida la
 caducidad (columnas, constraints, permisos, incidencias, vista, job y liberador en
 `BEFORE`), y recoge M3 en sus pendientes.
 
@@ -382,7 +432,8 @@ puertos, usando CLI **2.117.0** y la imagen Supabase Postgres **17.6.1.167**:
 
 - Dos ejecuciones consecutivas de `pnpm run db:reset:local --workdir <pruebas>`
   terminaron sin errores; la primera inició sin contenedor previo y ambas
-  recrearon la base desde cero. Tras cada una: cinco migraciones, un sorteo de
+  recrearon la base desde cero. Tras cada una: las cinco migraciones entonces
+  existentes, un sorteo de
   seed con cuatro premios y un único job `caducar-boletos-pendientes`.
 - **34 pruebas pgTAP: PASS.** Se ejecutaron con `pnpm supabase test db --workdir
   <pruebas>` sobre la segunda base reconstruida.
@@ -398,16 +449,37 @@ ambos. Cada archivo toma primero el lock advisory del job y reinicia, dentro de 
 transacción, el plazo de los pendientes que ya existían: una compra abandonada en la
 base de desarrollo o una corrida simultánea de cron no alteran los resultados.
 
+La migración de bloqueo de venta se aplicó después desde cero en el mismo tipo de
+contenedor desechable, con el seed incluido. La suite completa quedó en **108 pruebas
+pgTAP: PASS** (76 de regresión y 32 de contrato), dos veces seguidas y sin estado
+residual. Verifica que `P1004` prevalece sobre `P1001`, que validar antes de conciliar
+devuelve `P1006` y conserva la pausa, que degradar la incidencia a `55P03` no reabre
+ventas, que rechazar el boleto marcado tampoco, que un job sin verificación no levanta
+la pausa, que una edición inactiva devuelve `false`, la salida de una edición
+sobrevendida (`P1005`, rechazo en pausa sin descontar, conciliación auditada) y que el
+job solo levanta la pausa después de verificar igualdad.
+
+Las pruebas de los dos bloqueantes se comprobaron con mutaciones: reintroducir la pausa
+derivada de la incidencia por boleto rompe 7 aserciones, quitar el trigger `P1006` rompe
+3 y volver al liberador sin excepción para ediciones pausadas rompe 6. No se aplicó nada
+al proyecto remoto ni a la base local habitual.
+
 `caducidad_regresion.sql` cubre el huérfano de 10 tickets en rechazo manual, rechazo
 desde validado, UPDATE múltiple sano, idempotencia, cron con edición
-sana/inconsistente, RLS de la vista, antigüedad del fallo, validación con rollback,
-incidencias tardías y rechazo tras conciliación. `caducidad_contrato.sql` fija TTL
+sana/inconsistente, RLS de la vista, antigüedad del fallo, pausa persistente por
+edición, bloqueo público con `P1004`, orden con `P1006`, degradación a `55P03`,
+conciliación auditada, edición sobrevendida, verificación automática del job, guarda
+`P1003` sin pausa y limpieza de incidencias de boletos revisados.
+`caducidad_contrato.sql` fija TTL
 1–168, plazo desde cada entrada a pendiente y umbral estricto, autor y motivo de la
 caducidad, `P1002`, corrección auditada del motivo, origen cerrado de service_role,
 aislamiento de un error ordinario de fila, y función y job no expuestos.
-La incidencia tardía se prueba mediante una intercalación simulada; ni ella ni la
-contención `55P03` sustituyen las comprobaciones con dos sesiones que siguen a
-continuación. Para ampliar la revisión operativa después de aplicar en desarrollo:
+Las aserciones de `55P03` simulan el `UPSERT` que reemplaza el diagnóstico del
+boleto, porque una contención real necesita otra sesión. Se verificó aparte con dos
+sesiones: con el sorteo bloqueado, el reintento del job degrada la incidencia a
+`55P03`, la pausa permanece y la compra sigue devolviendo `P1004`. Ninguna prueba
+sustituye las comprobaciones con dos sesiones que siguen a continuación.
+Para ampliar la revisión operativa después de aplicar en desarrollo:
 
 - Probar pg_cron ausente: error `55000` antes del primer ALTER de caducidad y antes
   de programar; con pg_cron habilitado y permisos, no debe intentarse instalarlo.
@@ -435,7 +507,9 @@ continuación. Para ampliar la revisión operativa después de aplicar en desarr
   filas del mismo sorteo deben continuar y el fallo quedar aplazado. Crear más de
   1000 vencidos y verificar lotes sucesivos sin doble liberación.
 - En otra sesión mantener bloqueado un sorteo; el job debe registrar `55P03`,
-  saltar esa edición y liberar la sana en la misma ejecución. Verificar que el
+  saltar esa edición y liberar la sana en la misma ejecución. Si ya existía una
+  pausa `P1003`, debe permanecer y `comprar_tickets` debe seguir devolviendo `P1004`.
+  Verificar que el
   registro de la incidencia no espera por una FK al sorteo bloqueado.
   Repetir bloqueando 1000 boletos de una edición: las filas omitidas no deben
   consumir el presupuesto e impedir la caducidad de otra edición sana.
@@ -443,15 +517,16 @@ continuación. Para ampliar la revisión operativa después de aplicar en desarr
   autor/fecha originales, registrar corrector/fecha y no variar el cupo. Repetirlo,
   intentar valor inválido y corregir como usuario común/service_role.
 - Comprobar que anon, un usuario común, un admin por API y service_role no pueden
-  ejecutar la función. Los admins pueden editar TTL y leer motivos mediante sus
-  permisos existentes y corregir motivos con auditoría; no pueden reactivar rechazados.
+  ejecutar `caducar_boletos_pendientes`. Solo el admin puede ejecutar
+  `conciliar_contador_sorteo`; anon, usuario común y service_role reciben un error.
+  Validar antes de conciliar debe devolver `P1006`; rechazar durante la pausa debe
+  funcionar sin descontar del contador.
 - Revisar `cron.job` y `cron.job_run_details`: un único job con el nombre indicado,
   periodicidad y rol correctos, ejecuciones exitosas y fallos visibles. Si el
   proyecto está pausado o cron detenido, los pendientes conservan el cupo hasta
   que se reanuden las ejecuciones. Consultar también `incidencias_caducidad`:
-  reparar la causa por una vía administrativa y esperar el reintento o eliminar
-  la incidencia mediante SQL administrativo para adelantarlo. Los contadores
-  inconsistentes requieren conciliación de reservas antes de reintentar.
+  reparar la causa y esperar que el job verifique igualdad, o ejecutar la RPC de
+  conciliación. Borrar una incidencia por boleto no levanta `cuarentenas_sorteo`.
 
 La instalación y monitorización se basan en la
 [documentación de Supabase Cron](https://supabase.com/docs/guides/cron).

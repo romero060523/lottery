@@ -32,9 +32,10 @@ Proyecto nuevo, inspirado en el modelo de negocio de Premios Lorenzo (Perú), ad
 
 ## 2. Esquema de base de datos
 
-> El SQL que se aplica vive en `supabase/migrations/` (cinco archivos, en orden:
+> El SQL que se aplica vive en `supabase/migrations/` (seis archivos, en orden:
 > tablas e índices → funciones y triggers → permisos, RLS y Storage → caducidad de
-> pendientes → programación del job con `pg_cron`). Lo que sigue refleja el esquema
+> pendientes → programación del job con `pg_cron` → bloqueo de venta en cuarentena).
+> Lo que sigue refleja el esquema
 > **efectivo**: cuando una migración posterior reemplaza una función o un trigger,
 > aquí figura la última versión. Si algo diverge, **gana la migración** y hay que
 > corregir este documento.
@@ -152,8 +153,9 @@ revoke all on table public.admins, public.sorteos, public.sorteo_premios,
 **Todas las funciones** se crean con `set search_path = ''` y referencias calificadas
 por esquema, sin SQL dinámico. Al final de la segunda migración se revoca `execute` a
 `public`, `anon`, `authenticated` y `service_role`, y la sección 6 lo vuelve a
-conceder solo sobre las tres RPC que el navegador necesita. La migración de caducidad
-repite el revoke sobre sus funciones y no concede ninguna a la API.
+conceder solo sobre las tres RPC iniciales que el navegador necesita. La migración de
+caducidad repite el revoke sobre sus funciones y no concede ninguna a la API. La sexta
+migración agrega una cuarta RPC pública que solo devuelve el booleano de cuarentena.
 
 ```sql
 revoke all on function public.calcular_tickets_gratis(integer),
@@ -249,10 +251,32 @@ numeración — es normal y no representa cupo vendido.
 ### Compra atómica
 
 ```sql
+-- Superficie pública mínima: informa solo si una edición activa está pausada.
+-- No expone boletos, causas, intentos ni fechas operativas.
+create function public.sorteo_en_cuarentena(p_sorteo_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select exists (
+    select 1
+    from public.cuarentenas_sorteo q
+    join public.sorteos s on s.id = q.sorteo_id
+    where q.sorteo_id = p_sorteo_id and s.activo = true
+  );
+$$;
+
+revoke all on function public.sorteo_en_cuarentena(uuid)
+  from public, anon, authenticated, service_role;
+grant execute on function public.sorteo_en_cuarentena(uuid)
+  to anon, authenticated, service_role;
+
 -- SECURITY DEFINER: permite comprar con la anon key sin conceder escritura directa
 -- sobre boletos ni lectura de datos personales. El cliente no elige precio, código,
 -- cantidad gratis, estado ni auditoría.
-create function public.comprar_tickets(
+create or replace function public.comprar_tickets(
   p_sorteo_id uuid,
   p_cantidad integer,
   p_nombre_comprador text,
@@ -260,12 +284,18 @@ create function public.comprar_tickets(
   p_tipo_documento text,
   p_numero_documento text
 ) returns public.boletos
-language plpgsql security definer set search_path = '' as $$
+language plpgsql
+security definer
+set search_path = ''
+as $$
 declare
-  v_precio integer; v_gratis integer; v_incremento bigint;
-  v_max_tickets_por_compra integer; v_boleto public.boletos;
+  v_precio integer;
+  v_gratis integer;
+  v_incremento bigint;
+  v_max_tickets_por_compra integer;
+  v_boleto public.boletos;
 begin
-  v_gratis := public.calcular_tickets_gratis(p_cantidad);  -- lanza si es null, 0 o negativa
+  v_gratis := public.calcular_tickets_gratis(p_cantidad);
   v_incremento := p_cantidad::bigint + v_gratis;
 
   if p_sorteo_id is null or v_incremento > 2147483647 then
@@ -280,6 +310,17 @@ begin
       using errcode = '22023';
   end if;
 
+  -- Mantiene estable el contador mientras se consulta la pausa persistente; por MVCC
+  -- solo se ven pausas confirmadas. El job escribe la pausa sin soltar este lock (no
+  -- pasa por una excepción), así que una compra concurrente con la detección espera su
+  -- commit y ve la pausa. Si la compra tomó el lock primero, ese intento del job es 55P03.
+  perform 1 from public.sorteos where id = p_sorteo_id for no key update;
+
+  if found and public.sorteo_en_cuarentena(p_sorteo_id) then
+    raise exception 'La venta de esta edición está pausada mientras se concilian sus reservas'
+      using errcode = 'P1004';
+  end if;
+
   update public.sorteos
   set tickets_vendidos = tickets_vendidos + v_incremento
   where id = p_sorteo_id
@@ -292,8 +333,6 @@ begin
   returning precio_boleto into v_precio;
 
   if not found then
-    -- Distingue "superaste el tope por compra" del resto, para que el formulario
-    -- pueda mostrar un mensaje accionable en vez de un "no hay cupo" genérico.
     select max_tickets_por_compra into v_max_tickets_por_compra
     from public.sorteos
     where id = p_sorteo_id and activo = true
@@ -312,8 +351,9 @@ begin
     sorteo_id, nombre_comprador, telefono, tipo_documento, numero_documento,
     cantidad_comprada, cantidad_gratis, monto_total
   ) values (
-    p_sorteo_id, btrim(p_nombre_comprador), btrim(p_telefono), p_tipo_documento, btrim(p_numero_documento),
-    p_cantidad, v_gratis, (p_cantidad::bigint * v_precio)::integer
+    p_sorteo_id, btrim(p_nombre_comprador), btrim(p_telefono), p_tipo_documento,
+    btrim(p_numero_documento), p_cantidad, v_gratis,
+    (p_cantidad::bigint * v_precio)::integer
   ) returning * into v_boleto;
 
   return v_boleto;
@@ -324,8 +364,12 @@ $$;
 Lo que valida antes de escribir: cantidad positiva y sin desbordar `integer`, nombre
 (1–200), teléfono y documento (1–32), `tipo_documento` en la whitelist, sorteo activo,
 **ventana de ventas abierta** (`fecha_inicio_ventas <= now()` y `fecha_fin_ventas` nula
-o futura), **tope por compra** (`max_tickets_por_compra`) y cupo disponible contando
-los gratis. Nada de esto acredita identidad ni posesión del teléfono o el documento.
+o futura), ausencia de una pausa en `cuarentenas_sorteo`, **tope por compra**
+(`max_tickets_por_compra`) y cupo disponible contando los gratis. El lock mantiene
+estable la fila del sorteo frente a otros escritores durante la consulta; por MVCC solo
+puede observar pausas ya confirmadas. Como el job escribe la pausa sin soltar ese lock,
+una compra concurrente con la detección espera su commit y recibe `P1004`. Nada de esto
+acredita identidad ni posesión del teléfono o el documento.
 
 **Códigos de error propios.** El frontend los distingue por `error.code`, sin
 interpretar el texto del mensaje:
@@ -336,6 +380,9 @@ interpretar el texto del mensaje:
 | `P0001` | `comprar_tickets` | No hay cupo, la venta no está habilitada o el monto excede el límite admitido. |
 | `P1002` | `registrar_revision_boleto` | El boleto caducó mientras el admin lo revisaba: validarlo o devolverlo a `pendiente` falla. Hay que recargar; no puede reactivarse. |
 | `P1003` | `liberar_tickets_rechazados`, `caducar_boletos_pendientes` | El contador del sorteo no coincide con la suma de sus reservas. El rechazo (manual, de servicio o por caducidad) se revierte y la edición requiere conciliación manual. |
+| `P1004` | `comprar_tickets` | La edición activa tiene una pausa persistente causada por `P1003`. Se distingue de falta de cupo o tope. |
+| `P1005` | `conciliar_contador_sorteo` | Las reservas verificadas superan `tickets_totales`; hay que rechazar reservas durante la pausa hasta que quepan y volver a conciliar. |
+| `P1006` | `bloquear_validacion_en_cuarentena` | Se intentó validar un boleto (o devolverlo a `pendiente`) antes de conciliar la edición. Rechazar sí se permite durante la pausa. |
 
 Superar el tope no crea boletos ni modifica el contador.
 
@@ -456,6 +503,10 @@ create trigger trg_registrar_revision_boleto
 -- y esta todavía participa en la suma. Un AFTER ROW vería todos los rechazos
 -- de la sentencia antes de haber descontado sus reservas.
 -- SECURITY DEFINER porque el admin no tiene permiso de escritura sobre tickets_vendidos.
+-- Versión de la sexta migración: con la edición en pausa el contador no es confiable,
+-- así que un rechazo no lo descuenta ni aplica la guarda P1003 (la conciliación o el
+-- job al verificar igualdad lo recalculan). El lock del sorteo va primero, para que un
+-- rechazo concurrente con la conciliación vea la pausa ya levantada y descuente normalmente.
 create or replace function public.liberar_tickets_rechazados()
 returns trigger
 language plpgsql
@@ -470,6 +521,10 @@ begin
     select tickets_vendidos into v_contador
     from public.sorteos where id = old.sorteo_id
     for no key update;
+
+    if exists (select 1 from public.cuarentenas_sorteo where sorteo_id = old.sorteo_id) then
+      return new;
+    end if;
 
     select coalesce(sum(cantidad_total), 0) into v_reservas
     from public.boletos
@@ -508,7 +563,9 @@ compara `tickets_vendidos` con la suma de `cantidad_total` de los boletos no rec
 de la edición. Si no coinciden —por ejemplo, un boleto heredado que se insertó sin
 reservar cupo— lanza `P1003` y revierte estado, auditoría y liberación: que la cantidad
 quepa en el contador no demuestra que ese boleto haya reservado. Aplica igual a rechazos
-manuales, de servicio y por caducidad. Resolverlo exige conciliar el contador a mano.
+manuales, de servicio y por caducidad en una edición **sin pausa**. Cuando el job ya
+pausó la edición (`cuarentenas_sorteo`), el rechazo se acepta sin guarda y sin descontar:
+el contador se recalcula completo con la RPC auditada `conciliar_contador_sorteo`.
 
 **BEFORE, no AFTER.** El liberador pasó de `AFTER UPDATE` a `BEFORE UPDATE OF estado`
 para admitir rechazos múltiples sanos: la suma todavía incluye la fila actual y las
@@ -712,42 +769,101 @@ create policy incidencias_caducidad_select_admin on public.incidencias_caducidad
   for select to authenticated
   using (exists (select 1 from public.admins where user_id = (select auth.uid())));
 
--- Una fila por edición apartada por el job. El reintento vencido no implica que
--- la causa esté resuelta: sigue visible hasta resolverla o procesar el boleto.
--- SECURITY INVOKER conserva la RLS de incidencias, boletos y sorteos.
-create view public.ediciones_en_cuarentena
+-- La pausa pertenece a la edición. Las incidencias por boleto siguen siendo
+-- diagnóstico/reintento y pueden cambiar sin reabrir la venta.
+create table public.cuarentenas_sorteo (
+  sorteo_id uuid primary key references public.sorteos(id) on delete cascade,
+  codigo_error text not null default 'P1003' check (codigo_error = 'P1003'),
+  mensaje text not null,
+  cuarentena_desde timestamptz not null,
+  ultima_verificacion_en timestamptz not null,
+  verificaciones integer not null default 1 check (verificaciones > 0)
+);
+
+create table public.conciliaciones_sorteo (
+  id bigint generated always as identity primary key,
+  sorteo_id uuid not null references public.sorteos(id),
+  tickets_vendidos_anterior integer not null,
+  tickets_vendidos_conciliado integer not null,
+  conciliado_por uuid not null references public.admins(user_id),
+  conciliado_en timestamptz not null
+);
+
+alter table public.cuarentenas_sorteo enable row level security;
+alter table public.conciliaciones_sorteo enable row level security;
+revoke all on public.cuarentenas_sorteo, public.conciliaciones_sorteo
+  from public, anon, authenticated, service_role;
+grant select on public.cuarentenas_sorteo, public.conciliaciones_sorteo to authenticated;
+
+create policy cuarentenas_sorteo_select_admin on public.cuarentenas_sorteo
+  for select to authenticated
+  using (exists (select 1 from public.admins where user_id = (select auth.uid())));
+create policy conciliaciones_sorteo_select_admin on public.conciliaciones_sorteo
+  for select to authenticated
+  using (exists (select 1 from public.admins where user_id = (select auth.uid())));
+
+-- Conserva el contrato de columnas de la vista, pero la fila y su motivo salen
+-- del estado persistente de la edición, no del último error de un boleto.
+create or replace view public.ediciones_en_cuarentena
 with (security_invoker = true) as
 select s.id as sorteo_id, s.edicion_numero, s.nombre,
-  min(i.primera_incidencia_en) as cuarentena_desde,
-  max(i.registrado_en) as ultimo_fallo_en,
-  max(i.reintentar_desde) as reintentar_desde,
-  jsonb_agg(jsonb_build_object(
-    'boleto_id', i.boleto_id,
-    'codigo_error', i.codigo_error,
-    'mensaje', i.mensaje,
-    'desde', i.primera_incidencia_en,
-    'intentos', i.intentos
-  ) order by i.primera_incidencia_en, i.boleto_id) as motivos
-from public.incidencias_caducidad i
-join public.boletos b on b.id = i.boleto_id and b.sorteo_id = i.sorteo_id
-join public.sorteos s on s.id = i.sorteo_id
-where b.estado = 'pendiente' and i.codigo_error in ('55P03', 'P1003')
-group by s.id, s.edicion_numero, s.nombre;
+  q.cuarentena_desde,
+  q.ultima_verificacion_en as ultimo_fallo_en,
+  null::timestamptz as reintentar_desde,
+  jsonb_build_array(jsonb_build_object(
+    'boleto_id', null,
+    'codigo_error', q.codigo_error,
+    'mensaje', q.mensaje,
+    'desde', q.cuarentena_desde,
+    'intentos', q.verificaciones
+  )) as motivos
+from public.cuarentenas_sorteo q
+join public.sorteos s on s.id = q.sorteo_id;
 
 revoke all on public.ediciones_en_cuarentena from public, anon, authenticated, service_role;
 grant select on public.ediciones_en_cuarentena to authenticated;
 
--- Validar o rechazar resuelve la incidencia del boleto en la misma transacción.
--- El admin no recibe DELETE directo sobre incidencias ni puede borrar una
--- cuarentena cuyo boleto continúe pendiente.
-create function public.resolver_incidencia_caducidad()
+-- Validar (o devolver a pendiente) antes de conciliar aceptaría una reserva que el
+-- contador no reconoce, quizá por encima de la capacidad. Rechazar sí se permite:
+-- es la forma de bajar las reservas de una edición sobrevendida antes de conciliar.
+create function public.bloquear_validacion_en_cuarentena()
 returns trigger
 language plpgsql
 security definer
 set search_path = ''
 as $$
 begin
-  delete from public.incidencias_caducidad where boleto_id = new.id;
+  if new.estado is distinct from old.estado and new.estado <> 'rechazado' and exists (
+    select 1 from public.cuarentenas_sorteo where sorteo_id = old.sorteo_id
+  ) then
+    raise exception 'Concilia el contador de la edición antes de validar sus boletos'
+      using errcode = 'P1006';
+  end if;
+  return new;
+end;
+$$;
+
+create trigger trg_bloquear_validacion_en_cuarentena
+  before update of estado on public.boletos
+  for each row execute function public.bloquear_validacion_en_cuarentena();
+
+-- Una revisión ya no elimina el diagnóstico P1003 mientras la pausa de la
+-- edición siga abierta. La conciliación limpia ambos estados atómicamente.
+create or replace function public.resolver_incidencia_caducidad()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  delete from public.incidencias_caducidad i
+  where i.boleto_id = new.id
+    and not (
+      i.codigo_error = 'P1003'
+      and exists (
+        select 1 from public.cuarentenas_sorteo q where q.sorteo_id = i.sorteo_id
+      )
+    );
   return new;
 end;
 $$;
@@ -756,29 +872,117 @@ create trigger trg_resolver_incidencia_caducidad
   after update of estado on public.boletos
   for each row when (new.estado <> 'pendiente')
   execute function public.resolver_incidencia_caducidad();
+
+create function public.conciliar_contador_sorteo(p_sorteo_id uuid)
+returns public.conciliaciones_sorteo
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_admin uuid;
+  v_contador integer;
+  v_capacidad integer;
+  v_reservas bigint;
+  v_instante timestamptz := statement_timestamp();
+  v_auditoria public.conciliaciones_sorteo;
+begin
+  select user_id into v_admin
+  from public.admins
+  where user_id = (select auth.uid());
+
+  if v_admin is null then
+    raise exception 'Solo un administrador puede conciliar el contador de una edición'
+      using errcode = '42501';
+  end if;
+
+  select tickets_vendidos, tickets_totales into v_contador, v_capacidad
+  from public.sorteos
+  where id = p_sorteo_id
+  for no key update;
+
+  if not found then
+    raise exception 'La edición indicada no existe' using errcode = '22023';
+  end if;
+
+  if not exists (
+    select 1 from public.cuarentenas_sorteo where sorteo_id = p_sorteo_id
+  ) then
+    raise exception 'La edición indicada no está en cuarentena' using errcode = '22023';
+  end if;
+
+  select coalesce(sum(cantidad_total), 0) into v_reservas
+  from public.boletos
+  where sorteo_id = p_sorteo_id and estado <> 'rechazado';
+
+  if v_reservas > v_capacidad then
+    raise exception 'Las reservas verificadas (%) superan la capacidad de la edición (%); rechaza reservas hasta que quepan y vuelve a conciliar',
+      v_reservas, v_capacidad
+      using errcode = 'P1005';
+  end if;
+
+  update public.sorteos
+  set tickets_vendidos = v_reservas::integer
+  where id = p_sorteo_id;
+
+  insert into public.conciliaciones_sorteo (
+    sorteo_id, tickets_vendidos_anterior, tickets_vendidos_conciliado,
+    conciliado_por, conciliado_en
+  ) values (
+    p_sorteo_id, v_contador, v_reservas::integer, v_admin, v_instante
+  ) returning * into v_auditoria;
+
+  delete from public.incidencias_caducidad
+  where sorteo_id = p_sorteo_id and codigo_error = 'P1003';
+  delete from public.cuarentenas_sorteo where sorteo_id = p_sorteo_id;
+
+  return v_auditoria;
+end;
+$$;
+
+revoke all on function public.conciliar_contador_sorteo(uuid),
+  public.bloquear_validacion_en_cuarentena()
+  from public, anon, authenticated, service_role;
+grant execute on function public.conciliar_contador_sorteo(uuid) to authenticated;
 ```
 
 - **`incidencias_caducidad`** guarda una fila abierta por boleto que falló: código
   SQLSTATE, mensaje, intentos, primer fallo de esa misma causa (se conserva en los
-  reintentos y se reinicia si cambia el código), último registro y próximo reintento. La
-  escribe el job y la borran el trigger de resolución o la limpieza del propio job; los
-  admins solo la leen por RLS. No es un historial: la
-  auditoría de la revisión queda en `boletos`.
-- **`ediciones_en_cuarentena`** muestra una fila por edición con incidencias abiertas de
-  contador (`P1003`) o contención (`55P03`) cuyo boleto sigue pendiente. Por
-  `security_invoker`, un admin ve también ediciones inactivas, una sesión sin admin ve cero
-  filas y `anon` no tiene `SELECT`. Que la fecha de reintento haya vencido no significa que
-  esté resuelta. Es la consulta que debe usar el panel: el resultado del cron o la cantidad
-  de caducados no bastan para detectar una cuarentena.
-- **Resolución**: validar o rechazar borra la incidencia de ese boleto en la misma
-  transacción, y un `ROLLBACK` la restaura. **No concilia el contador**: si la edición sigue
-  inconsistente, la siguiente reserva vencida vuelve a producir `P1003` sin esperar el
-  aplazamiento del boleto resuelto.
+  reintentos y se reinicia si cambia el código), último registro y próximo reintento. Es
+  diagnóstico operativo por boleto; un `UPSERT` puede cambiar de `P1003` a `55P03` sin
+  modificar la pausa de la edición.
+- **`cuarentenas_sorteo`** es la fuente de verdad de la pausa. Tiene una fila por edición
+  desde el primer `P1003` hasta que el job verifica igualdad o un admin ejecuta la
+  conciliación. Validar un boleto y los errores `55P03` no la eliminan.
+- **`ediciones_en_cuarentena`** muestra ese estado persistente, su motivo, desde cuándo
+  existe y cuántas verificaciones fallaron. Por `security_invoker`, un admin ve también
+  ediciones inactivas, una sesión sin admin ve cero filas y `anon` no tiene `SELECT`.
+  **Cambio de contrato respecto de la quinta migración:** ya no lista ediciones que solo
+  tienen contención `55P03` (no están en pausa), `motivos` trae `boleto_id` en `null` y
+  `reintentar_desde` es siempre `null`. El detalle por boleto y los reintentos se consultan
+  en `incidencias_caducidad`.
+- **`sorteo_en_cuarentena(uuid)`** expone a `anon`, `authenticated` y `service_role`
+  únicamente el booleano de una edición **activa**. No revela boletos, motivo, fechas ni
+  intentos. `comprar_tickets` rechaza con `P1004` mientras exista la pausa confirmada.
+- **Conciliación auditada**: `conciliar_contador_sorteo(uuid)` está disponible solo para
+  un usuario autenticado presente en `admins`. Con la fila del sorteo bloqueada, calcula
+  pendientes más validados, comprueba que no superen la capacidad, ajusta el contador,
+  registra valor anterior/nuevo, admin y fecha en `conciliaciones_sorteo`, y recién después
+  elimina `P1003` y la pausa. Si las reservas superan la capacidad devuelve `P1005` y no
+  cambia nada. `service_role` no puede ejecutar la RPC.
+- **Orden obligatorio: conciliar antes de validar.** Mientras la pausa exista, validar un
+  boleto o devolverlo a `pendiente` devuelve `P1006`. Ni validar ni rechazar el boleto
+  marcado levantan la pausa, y el diagnóstico `P1003` se conserva como evidencia hasta
+  conciliar.
+- **Edición sobrevendida (`P1005`)**: si las reservas superan la capacidad, el admin
+  **rechaza** reservas durante la pausa hasta que quepan (se permite, y no descuenta del
+  contador porque la conciliación lo recalcula) y luego concilia. La venta sigue pausada
+  todo ese tiempo; recién después se validan los pagos.
 
 **Job de caducidad.**
 
 ```sql
-create function public.caducar_boletos_pendientes()
+create or replace function public.caducar_boletos_pendientes()
 returns integer
 language plpgsql
 security invoker
@@ -802,14 +1006,20 @@ begin
     return 0;
   end if;
 
-  -- Sin FK pueden existir incidencias de boletos eliminados por mantenimiento,
-  -- o registradas después de una validación concurrente al liberar el subbloque.
+  -- Las incidencias P1003 se conservan como diagnóstico hasta que la edición
+  -- sea verificada o conciliada, incluso si su boleto ya fue revisado.
   with resueltas as (
     select i.boleto_id from public.incidencias_caducidad i
     where not exists (
       select 1 from public.boletos b
       where b.id = i.boleto_id and b.sorteo_id = i.sorteo_id and b.estado = 'pendiente'
     )
+      and not (
+        i.codigo_error = 'P1003'
+        and exists (
+          select 1 from public.cuarentenas_sorteo q where q.sorteo_id = i.sorteo_id
+        )
+      )
     for update of i skip locked
   )
   delete from public.incidencias_caducidad i
@@ -833,6 +1043,7 @@ begin
   loop
     v_comprobado := false;
 
+    <<candidatos>>
     for v_candidato in
       select boletos.id
       from public.boletos
@@ -848,7 +1059,6 @@ begin
       end if;
 
       begin
-        -- El lock pertenece al bloque: una excepción también lo libera.
         select pendiente_desde into v_pendiente_desde
         from public.boletos
         where id = v_candidato.id and estado = 'pendiente'
@@ -858,7 +1068,6 @@ begin
           continue;
         end if;
 
-        -- Las filas bloqueadas no agotan el presupuesto de otros sorteos.
         v_intentos := v_intentos + 1;
 
         select ttl_pendientes_horas, tickets_vendidos into v_ttl, v_contador
@@ -870,17 +1079,48 @@ begin
         end if;
 
         if not v_comprobado then
-          -- Comprobación histórica una vez por sorteo, con su contador bloqueado.
-          -- No se puede atribuir una reserva a un INSERT antiguo fuera de la RPC.
           select coalesce(sum(cantidad_total), 0) into v_reservas
           from public.boletos
           where sorteo_id = v_sorteo.id and estado <> 'rechazado';
 
           if v_contador <> v_reservas then
-            raise exception 'El contador del sorteo no coincide con sus boletos reservados; requiere conciliación'
-              using errcode = 'P1003';
+            v_mensaje := 'El contador del sorteo no coincide con sus boletos reservados; requiere conciliación';
+
+            insert into public.cuarentenas_sorteo (
+              sorteo_id, mensaje, cuarentena_desde, ultima_verificacion_en
+            ) values (
+              v_sorteo.id, v_mensaje, v_instante, v_instante
+            ) on conflict (sorteo_id) do update set
+              mensaje = excluded.mensaje,
+              ultima_verificacion_en = excluded.ultima_verificacion_en,
+              verificaciones = public.cuarentenas_sorteo.verificaciones + 1;
+
+            insert into public.incidencias_caducidad (
+              boleto_id, sorteo_id, codigo_error, mensaje, primera_incidencia_en,
+              registrado_en, reintentar_desde
+            ) values (
+              v_candidato.id, v_sorteo.id, 'P1003', v_mensaje, v_instante, v_instante,
+              v_instante + interval '1 hour'
+            ) on conflict (boleto_id) do update set
+              primera_incidencia_en = case
+                when public.incidencias_caducidad.codigo_error = excluded.codigo_error
+                  then public.incidencias_caducidad.primera_incidencia_en
+                else excluded.primera_incidencia_en
+              end,
+              codigo_error = excluded.codigo_error,
+              mensaje = excluded.mensaje,
+              registrado_en = excluded.registrado_en,
+              reintentar_desde = excluded.reintentar_desde,
+              intentos = public.incidencias_caducidad.intentos + 1;
+
+            exit candidatos;
           end if;
 
+          -- Una verificación consistente del job levanta la pausa. Si cualquier
+          -- paso posterior falla, el subbloque revierte también esta limpieza.
+          delete from public.incidencias_caducidad
+          where sorteo_id = v_sorteo.id and codigo_error = 'P1003';
+          delete from public.cuarentenas_sorteo where sorteo_id = v_sorteo.id;
           v_comprobado := true;
         end if;
 
@@ -891,8 +1131,18 @@ begin
         v_caducados := v_caducados + 1;
       exception when others then
         get stacked diagnostics v_codigo_error = returned_sqlstate, v_mensaje = message_text;
-        -- Las variables PL/pgSQL no retroceden al abortar el subbloque.
         v_comprobado := false;
+
+        if v_codigo_error = 'P1003' then
+          insert into public.cuarentenas_sorteo (
+            sorteo_id, mensaje, cuarentena_desde, ultima_verificacion_en
+          ) values (
+            v_sorteo.id, v_mensaje, v_instante, v_instante
+          ) on conflict (sorteo_id) do update set
+            mensaje = excluded.mensaje,
+            ultima_verificacion_en = excluded.ultima_verificacion_en,
+            verificaciones = public.cuarentenas_sorteo.verificaciones + 1;
+        end if;
 
         insert into public.incidencias_caducidad (
           boleto_id, sorteo_id, codigo_error, mensaje, primera_incidencia_en,
@@ -913,10 +1163,10 @@ begin
           intentos = public.incidencias_caducidad.intentos + 1;
 
         if v_codigo_error in ('55P03', 'P1003') then
-          exit;
+          exit candidatos;
         end if;
       end;
-    end loop;
+    end loop candidatos;
   end loop;
 
   return v_caducados;
@@ -936,9 +1186,11 @@ revoke all on function public.registrar_revision_boleto(), public.caducar_boleto
   comprobación del TTL con el sorteo bloqueado: reducirlo afecta pendientes existentes y
   aumentarlo les da más margen. También procesa sorteos cerrados o inactivos.
 - **Contador antes de caducar**: compara una vez por sorteo el contador con las reservas
-  (y otra vez tras un fallo de fila). Si no coinciden lanza `P1003`, que registra la
-  incidencia, aparta la edición **1 hora** y sigue con las demás. No resta cupos de esa
-  edición ni corrige su contador.
+  (y otra vez tras un fallo de fila). Si no coinciden, crea o actualiza la pausa por
+  edición y el diagnóstico `P1003` mientras conserva el lock del sorteo; aplaza el
+  boleto **1 hora** y sigue con las demás. No resta cupos ni corrige el contador. Cuando
+  una ejecución posterior obtiene el lock y verifica igualdad, elimina la pausa antes de
+  caducar; un fallo posterior de esa fila revierte también esa limpieza.
 - **Aislamiento de errores**: cada fila corre en un bloque `EXCEPTION`, así que un error
   revierte solo esa fila y sus triggers. Un error ordinario aplaza la fila **1 hora**. La
   contención del sorteo (`55P03`, incluido `lock_timeout`) abandona esa edición por
@@ -1000,7 +1252,7 @@ corrida y no garantiza progreso de ese lote (caso de livelock abierto). El presu
 
 La forma de pago queda en blanco por ahora — el esquema ya está preparado para no requerir migraciones cuando se implemente.
 
-**Fase 1 (ahora):** el formulario de registro público llama a la RPC `comprar_tickets` (ver sección 2), que reserva los tickets y crea el boleto en `estado = 'pendiente'`, con `metodo_pago` y `comprobante_url` en null (no se exige comprobante todavía). Desde el panel admin se agrega una vista `AdminBoletosPage` donde el admin revisa manualmente y cambia `estado` a `validado` o `rechazado`. Quien graba `validado_por = 'admin:<user_id>'`, `validado_en = statement_timestamp()` y `motivo_rechazo` es el trigger `registrar_revision_boleto`, no el panel: el cliente solo manda `estado`, y lo que enviara en esos campos se descarta. Si se rechaza, el trigger `liberar_tickets_rechazados` comprueba el contador (`P1003`) y devuelve esos tickets al cupo disponible, una sola vez; el boleto queda en un estado terminal y no se puede reactivar (ver pendiente #5). Si nadie lo revisa antes de `ttl_pendientes_horas` (24 h por defecto) contadas desde `pendiente_desde`, el job de caducidad lo rechaza con motivo `caducidad` y devuelve su cupo; si el admin intenta validarlo después, recibe `P1002` (ver "Caducidad de pendientes" en la sección 2).
+**Fase 1 (ahora):** el formulario de registro público llama a la RPC `comprar_tickets` (ver sección 2), que reserva los tickets y crea el boleto en `estado = 'pendiente'`, con `metodo_pago` y `comprobante_url` en null (no se exige comprobante todavía). Desde el panel admin se agrega una vista `AdminBoletosPage` donde el admin revisa manualmente y cambia `estado` a `validado` o `rechazado`. Quien graba `validado_por = 'admin:<user_id>'`, `validado_en = statement_timestamp()` y `motivo_rechazo` es el trigger `registrar_revision_boleto`, no el panel: el cliente solo manda `estado`, y lo que enviara en esos campos se descarta. Si la edición está en cuarentena, el panel debe llamar primero a `conciliar_contador_sorteo` y después validar el boleto; validar antes devuelve `P1006`. Si la conciliación responde `P1005` (reservas sobre la capacidad), el admin rechaza durante la pausa las reservas que no se honrarán y vuelve a conciliar. Si se rechaza, el trigger `liberar_tickets_rechazados` comprueba el contador (`P1003`) y devuelve esos tickets al cupo disponible, una sola vez; el boleto queda en un estado terminal y no se puede reactivar (ver pendiente #5). Si nadie lo revisa antes de `ttl_pendientes_horas` (24 h por defecto) contadas desde `pendiente_desde`, el job de caducidad lo rechaza con motivo `caducidad` y devuelve su cupo; si el admin intenta validarlo después, recibe `P1002` (ver "Caducidad de pendientes" en la sección 2).
 
 **Fase 2 (cuando se defina el pago, ej. Nequi):** se agrega el upload de comprobante en el formulario público + una Edge Function `validate-comprobante-nequi` que hace OCR, completa `metodo_pago` y `comprobante_url`, y actualiza `estado`/`validado_por = 'ocr:nequi'` automáticamente. Con `service_role` solo puede actualizar revisión, método de pago y comprobante: si alguna vez necesita registrar una compra, usa `comprar_tickets`, porque el `INSERT` directo sobre `boletos` está revocado. No cambia la estructura de tablas, solo el flujo — la revisión manual puede seguir existiendo como respaldo para los casos que el OCR no logre leer.
 
@@ -1117,7 +1369,8 @@ grant all on public.admins, public.sorteos, public.sorteo_premios,
   public.boletos, public.ganadores to service_role;
 grant all on sequence public.boletos_codigo_seq to service_role;
 
--- Las tres únicas funciones que el navegador puede invocar
+-- Las tres funciones públicas iniciales; la sexta migración agrega el booleano
+-- sorteo_en_cuarentena(uuid) con su propio grant.
 grant execute on function public.calcular_tickets_gratis(integer),
   public.calcular_monto_total(integer, integer),
   public.comprar_tickets(uuid, integer, text, text, text, text)
@@ -1222,7 +1475,8 @@ Resumen de quién ve y hace qué:
 | Premios | Lee los de sorteos activos | Ídem | Lee, crea, edita y elimina |
 | Ganadores | Lee | Lee | Lee, crea, edita y elimina |
 | Boletos | Sin acceso | Cero filas visibles | Lee todos, cambia `estado` y corrige `motivo_rechazo` (auditado) |
-| Incidencias de caducidad y `ediciones_en_cuarentena` | Sin acceso | Cero filas visibles | Lee; no borra ni edita (las resuelve validar o rechazar el boleto) |
+| Incidencias, cuarentenas, conciliaciones y `ediciones_en_cuarentena` | Sin acceso | Cero filas visibles | Lee; concilia por RPC antes de revisar el boleto |
+| `sorteo_en_cuarentena` | Consulta solo el booleano `P1003` | Ídem | Ídem; el detalle sigue en la vista admin |
 | Admins | Sin acceso | Solo su propia fila | Solo su propia fila |
 | Banners | Lee | Lee | Lee, sube, reemplaza y elimina |
 | Comprobantes | Sin acceso | Sin acceso | Sin acceso directo desde el navegador |
@@ -1288,7 +1542,7 @@ Ya lo revisé. Dos cosas importantes antes del detalle:
 
 **Modelo "4+1 gratis" en Tickets (resuelto):** el diseño mostraba "5 tickets · $25.000 COP" sin comunicar el gratis. Los quick-picks muestran ahora "5 tickets + 1 gratis · $25.000 COP" y bajo el total se detalla "Recibes 6 tickets: 5 comprados + 1 gratis". Montos y gratis salen de `calcular_monto_total`; el cliente solo replica `cantidad + cantidad / 4` para acotar el selector al cupo restante, y `comprar_tickets` vuelve a validarlo.
 
-**Cuándo no se ofrece el selector:** si la edición no abrió ventas, las cerró (o está inactiva) o no le queda cupo para una sola compra, `TicketsSection` muestra un aviso sin selector ni CTA. El máximo por compra es el menor entre `max_tickets_por_compra`, lo que cabe en el cupo restante contando los gratis y el rango de `integer` del monto. Se recalcula con cada refetch del sorteo, y la apertura o el cierre de ventas se aplican a la hora exacta sin recargar. La cuarentena no se refleja: ver pendiente #8.
+**Cuándo no se ofrece el selector:** si la edición no abrió ventas, las cerró (o está inactiva) o no le queda cupo para una sola compra, `TicketsSection` muestra un aviso sin selector ni CTA. El máximo por compra es el menor entre `max_tickets_por_compra`, lo que cabe en el cupo restante contando los gratis y el rango de `integer` del monto. Se recalcula con cada refetch del sorteo, y la apertura o el cierre de ventas se aplican a la hora exacta sin recargar. El servidor ya expone `sorteo_en_cuarentena`; conectar ese booleano a `TicketsSection` queda para el cambio de frontend. Aunque la UI aún no lo muestre, `comprar_tickets` bloquea la venta con `P1004`.
 
 **Textos del prototipo ajustados al flujo real (sección 3):** el paso 2 prometía "pasarela verificada y confirmación inmediata" y el 3, que el código "llega al instante a tu correo"; la revisión del pago es manual y no se guarda correo. El total decía "un código único por cada participación", pero cada compra genera un solo boleto con un código. El pase decía "Escanea para validar", y no existe validación por QR.
 
@@ -1298,8 +1552,8 @@ Ya lo revisé. Dos cosas importantes antes del detalle:
 
 Lo más importante primero — el punto donde un sitio de sorteos realmente se rompe bajo carga es la compra concurrente de tickets, así que el diseño de datos ya lo prioriza:
 
-1. **Sin sobreventa bajo concurrencia.** `comprar_tickets` (sección 2) reserva con un único `UPDATE ... WHERE tickets_vendidos + incremento <= tickets_totales`. Postgres resuelve esto con un lock de fila breve e implícito — no con un `SELECT FOR UPDATE` de transacción larga ni con un `SUM()` sobre toda la tabla `boletos` en cada compra, que se pondría cada vez más lento a medida que crece la tabla. El lock es por fila de `sorteos`, así que ediciones distintas no se bloquean entre sí; solo se serializan las compras de la *misma* edición, que es exactamente donde se necesita la protección.
-2. **Contador de lectura barata.** `tickets_vendidos` es denormalizado — el Hero y la barra de progreso lo leen directo, sin agregación. Se mantiene consistente con el trigger `liberar_tickets_rechazados`, que lo decrementa cuando se rechaza un boleto (manual, de servicio o por caducidad). Antes de descontar, ese trigger suma las reservas de la edición para detectar descuadres (`P1003`): es un costo por rechazo, también dentro del job, que `comprar_tickets` no paga.
+1. **Sin sobreventa bajo concurrencia.** `comprar_tickets` (sección 2) toma un lock breve de la fila del sorteo, consulta la pausa confirmada y reserva con un `UPDATE ... WHERE tickets_vendidos + incremento <= tickets_totales`. El lock es por fila, así que ediciones distintas no se bloquean entre sí. No vuelve visible una detección aún no confirmada: una compra que obtuvo el lock primero termina antes, y ese intento del job registra `55P03` en vez de detectar. Para cerrar la ventana contraria, el job escribe `cuarentenas_sorteo` sin lanzar excepción, así que conserva el lock hasta su commit; una compra que llega durante la detección espera y luego recibe `P1004`. Si esa espera supera el `statement_timeout` del rol (3 s para `anon`), la compra falla por timeout: tampoco vende.
+2. **Contador de lectura barata.** `tickets_vendidos` es denormalizado — el Hero y la barra de progreso lo leen directo, sin agregación. Se mantiene consistente con el trigger `liberar_tickets_rechazados`, que lo decrementa cuando se rechaza un boleto (manual, de servicio o por caducidad). Antes de descontar, ese trigger suma las reservas de la edición para detectar descuadres (`P1003`): es un costo por rechazo, también dentro del job. La compra no calcula ese `SUM()`; solo hace un `EXISTS` por clave primaria sobre `cuarentenas_sorteo` para impedir ventas mientras se concilia la edición.
 3. **Índices** en las columnas por las que se filtra seguido: `boletos.sorteo_id`, `boletos.estado` (para `AdminBoletosPage`), `sorteo_id` en `sorteo_premios`/`ganadores`, y `premio_id`/`boleto_id` en `ganadores` para resolver el Hall of fame sin recorrer la tabla. El job de caducidad usa el índice parcial `idx_boletos_pendientes_caducidad` (`sorteo_id, pendiente_desde, id` solo sobre pendientes), que no crece con los boletos ya revisados. `boletos.numero_documento` también está indexado, pero hoy **no lo usa nadie**: la consulta pública por documento está cerrada hasta decidir el pendiente #6.
 4. **Code-splitting del bundle:** cargar `/admin/*` con `React.lazy` + `Suspense` en vez de en el bundle principal — los visitantes públicos (que son la mayoría del tráfico) no descargan el código del panel admin. `@supabase/supabase-js` ya entra en el bundle público porque la landing lee `sorteos` y `sorteo_premios`; Vite avisa que el chunk principal supera los 500 kB minificados.
 5. **Cacheo:** TanStack Query ya evita refetchear lo mismo en cada render; para las imágenes de premios/banners (que se comparten mucho por WhatsApp), usar las transformaciones de Supabase Storage o un CDN para servir tamaños optimizados en vez de la imagen original completa.
@@ -1317,16 +1571,15 @@ Lo más importante primero — el punto donde un sitio de sorteos realmente se r
    - actualizar por `id` **y** `estado = 'pendiente'` y tratar cero filas como conflicto (ganó la caducidad).
 5. **`rechazado` es terminal por diseño.** Un boleto rechazado no se puede reactivar: su cupo ya volvió al contador y puede haberlo tomado otra persona, así que reactivarlo permitiría sobreventa. La red de seguridad contra un rechazo por error del admin va en la UI (`AdminBoletosPage`, con confirmación explícita antes de rechazar), **no en el esquema**. Si el rechazo fue un error, el camino es una compra nueva sujeta a disponibilidad.
 6. **`TicketLookupPage` no tiene camino de consulta todavía.** Buscar solo por número de documento no demuestra identidad y permite enumerar documentos, así que no se expone ningún endpoint público de búsqueda —ni como `select` ni como RPC— hasta decidir el mecanismo: un OTP al teléfono registrado (con límites por IP y destinatario, caducidad corta y respuesta genérica exista o no el documento), o un token de alta entropía entregado al comprar, guardado solo como hash y revocable. No se debe reutilizar el código `PD-00001`, el documento ni el UUID del boleto como credencial. Mientras tanto la ruta `/consulta` queda sin implementar y el índice `idx_boletos_numero_documento` no tiene consumidor.
-7. **`estado`, `tipo_documento`, `tipo` y `motivo_rechazo` salen como `string` en los tipos generados**, no como uniones: en la BD son CHECK constraints, no enums de Postgres, así que `supabase gen types` no puede estrecharlos y `Constants.public.Enums` viene vacío. Hay que decidir entre declarar las uniones a mano en el cliente (rápido, pero se desincroniza del esquema sin avisar) o convertirlos a enums de Postgres en una migración (los tipos generados quedan estrechos y sincronizados, a cambio de que agregar un valor nuevo sea una migración). Además, `src/lib/database.types.ts` ya incluye las columnas y objetos de la caducidad; hay que regenerarlo (`pnpm types` sobre una base con todas las migraciones) cada vez que cambie el esquema.
-8. **Venta durante una cuarentena (`P1003`).** La landing no puede saber si una edición está en cuarentena: `ediciones_en_cuarentena` no da `SELECT` a `anon` y una sesión sin admin ve cero filas. Tampoco es una compra imposible: `comprar_tickets` no consulta incidencias y sigue vendiendo. Pero con `P1003` el contador está por debajo de las reservas reales, así que el cupo que ve el público es mayor al verdadero y una compra puede sobrevender. Bloquearlo solo en el frontend no sirve, porque la RPC se invoca directo con la anon key. Hay que decidir en el servidor: que `comprar_tickets` rechace ediciones con una incidencia `P1003` abierta (con un código propio que el frontend muestre como "venta en pausa") y, si se quiere mostrar el estado antes de intentar, exponer solo ese booleano con una función `SECURITY DEFINER`, sin abrir la vista. La contención `55P03` es transitoria y no afecta a los compradores.
-
+7. **`estado`, `tipo_documento`, `tipo` y `motivo_rechazo` salen como `string` en los tipos generados**, no como uniones: en la BD son CHECK constraints, no enums de Postgres, así que `supabase gen types` no puede estrecharlos y `Constants.public.Enums` viene vacío. Hay que decidir entre declarar las uniones a mano en el cliente (rápido, pero se desincroniza del esquema sin avisar) o convertirlos a enums de Postgres en una migración (los tipos generados quedan estrechos y sincronizados, a cambio de que agregar un valor nuevo sea una migración). Además, `src/lib/database.types.ts` ya incluye las columnas y objetos de la caducidad; hay que regenerarlo (`pnpm types` sobre una base con todas las migraciones) cada vez que cambie el esquema. Tras la sexta migración falta regenerarlo con `cuarentenas_sorteo`, `conciliaciones_sorteo` y `conciliar_contador_sorteo`.
+8. **`service_role` todavía escribe `tickets_vendidos` sin auditoría.** La conciliación auditada `conciliar_contador_sorteo` es la única vía para el admin, pero `service_role` conserva el `grant all` sobre `sorteos` de la tercera migración. No puede borrar una pausa, pero si iguala el contador a las reservas, el siguiente job que verifique la edición la levanta sin dejar registro en `conciliaciones_sorteo`. Cerrarlo exige cambiar ese grant por uno de columnas que excluya `tickets_vendidos` (y la auditoría), y revisar antes qué necesita la futura Edge Function de Nequi.
 ## 10. Setup local
 
 Requiere Docker corriendo y pnpm.
 
 ```bash
 pnpm install              # incluye el CLI de Supabase como devDependency
-pnpm run db:reset:local   # recrea la base local: 5 migraciones, pg_cron y seed (BORRA sus datos)
+pnpm run db:reset:local   # recrea la base local: 6 migraciones, pg_cron y seed (BORRA sus datos)
 pnpm supabase start       # levanta el resto de servicios: API, Auth, Storage y Studio
 pnpm types                # regenera src/lib/database.types.ts desde la base local
 pnpm dev
