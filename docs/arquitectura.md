@@ -32,9 +32,10 @@ Proyecto nuevo, inspirado en el modelo de negocio de Premios Lorenzo (Perú), ad
 
 ## 2. Esquema de base de datos
 
-> El SQL que se aplica vive en `supabase/migrations/` (cinco archivos, en orden:
+> El SQL que se aplica vive en `supabase/migrations/` (seis archivos, en orden:
 > tablas e índices → funciones y triggers → permisos, RLS y Storage → caducidad de
-> pendientes → programación del job con `pg_cron`). Lo que sigue refleja el esquema
+> pendientes → programación del job con `pg_cron` → bloqueo de venta en cuarentena).
+> Lo que sigue refleja el esquema
 > **efectivo**: cuando una migración posterior reemplaza una función o un trigger,
 > aquí figura la última versión. Si algo diverge, **gana la migración** y hay que
 > corregir este documento.
@@ -152,8 +153,9 @@ revoke all on table public.admins, public.sorteos, public.sorteo_premios,
 **Todas las funciones** se crean con `set search_path = ''` y referencias calificadas
 por esquema, sin SQL dinámico. Al final de la segunda migración se revoca `execute` a
 `public`, `anon`, `authenticated` y `service_role`, y la sección 6 lo vuelve a
-conceder solo sobre las tres RPC que el navegador necesita. La migración de caducidad
-repite el revoke sobre sus funciones y no concede ninguna a la API.
+conceder solo sobre las tres RPC iniciales que el navegador necesita. La migración de
+caducidad repite el revoke sobre sus funciones y no concede ninguna a la API. La sexta
+migración agrega una cuarta RPC pública que solo devuelve el booleano de cuarentena.
 
 ```sql
 revoke all on function public.calcular_tickets_gratis(integer),
@@ -249,10 +251,34 @@ numeración — es normal y no representa cupo vendido.
 ### Compra atómica
 
 ```sql
+-- Superficie pública mínima: informa solo si P1003 mantiene la edición en
+-- cuarentena. No expone boletos, causas, intentos ni fechas operativas.
+create function public.sorteo_en_cuarentena(p_sorteo_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select exists (
+    select 1
+    from public.incidencias_caducidad i
+    join public.boletos b on b.id = i.boleto_id and b.sorteo_id = i.sorteo_id
+    where i.sorteo_id = p_sorteo_id
+      and i.codigo_error = 'P1003'
+      and b.estado = 'pendiente'
+  );
+$$;
+
+revoke all on function public.sorteo_en_cuarentena(uuid)
+  from public, anon, authenticated, service_role;
+grant execute on function public.sorteo_en_cuarentena(uuid)
+  to anon, authenticated, service_role;
+
 -- SECURITY DEFINER: permite comprar con la anon key sin conceder escritura directa
 -- sobre boletos ni lectura de datos personales. El cliente no elige precio, código,
 -- cantidad gratis, estado ni auditoría.
-create function public.comprar_tickets(
+create or replace function public.comprar_tickets(
   p_sorteo_id uuid,
   p_cantidad integer,
   p_nombre_comprador text,
@@ -260,12 +286,18 @@ create function public.comprar_tickets(
   p_tipo_documento text,
   p_numero_documento text
 ) returns public.boletos
-language plpgsql security definer set search_path = '' as $$
+language plpgsql
+security definer
+set search_path = ''
+as $$
 declare
-  v_precio integer; v_gratis integer; v_incremento bigint;
-  v_max_tickets_por_compra integer; v_boleto public.boletos;
+  v_precio integer;
+  v_gratis integer;
+  v_incremento bigint;
+  v_max_tickets_por_compra integer;
+  v_boleto public.boletos;
 begin
-  v_gratis := public.calcular_tickets_gratis(p_cantidad);  -- lanza si es null, 0 o negativa
+  v_gratis := public.calcular_tickets_gratis(p_cantidad);
   v_incremento := p_cantidad::bigint + v_gratis;
 
   if p_sorteo_id is null or v_incremento > 2147483647 then
@@ -280,6 +312,16 @@ begin
       using errcode = '22023';
   end if;
 
+  -- Serializa la comprobación de cuarentena con las reservas de esta edición.
+  -- La incidencia puede consultarse después de obtener el lock con una sentencia
+  -- nueva, de modo que una compra que esperaba vea el P1003 ya confirmado.
+  perform 1 from public.sorteos where id = p_sorteo_id for no key update;
+
+  if found and public.sorteo_en_cuarentena(p_sorteo_id) then
+    raise exception 'La venta de esta edición está pausada mientras se concilian sus reservas'
+      using errcode = 'P1004';
+  end if;
+
   update public.sorteos
   set tickets_vendidos = tickets_vendidos + v_incremento
   where id = p_sorteo_id
@@ -292,8 +334,6 @@ begin
   returning precio_boleto into v_precio;
 
   if not found then
-    -- Distingue "superaste el tope por compra" del resto, para que el formulario
-    -- pueda mostrar un mensaje accionable en vez de un "no hay cupo" genérico.
     select max_tickets_por_compra into v_max_tickets_por_compra
     from public.sorteos
     where id = p_sorteo_id and activo = true
@@ -312,8 +352,9 @@ begin
     sorteo_id, nombre_comprador, telefono, tipo_documento, numero_documento,
     cantidad_comprada, cantidad_gratis, monto_total
   ) values (
-    p_sorteo_id, btrim(p_nombre_comprador), btrim(p_telefono), p_tipo_documento, btrim(p_numero_documento),
-    p_cantidad, v_gratis, (p_cantidad::bigint * v_precio)::integer
+    p_sorteo_id, btrim(p_nombre_comprador), btrim(p_telefono), p_tipo_documento,
+    btrim(p_numero_documento), p_cantidad, v_gratis,
+    (p_cantidad::bigint * v_precio)::integer
   ) returning * into v_boleto;
 
   return v_boleto;
@@ -324,8 +365,10 @@ $$;
 Lo que valida antes de escribir: cantidad positiva y sin desbordar `integer`, nombre
 (1–200), teléfono y documento (1–32), `tipo_documento` en la whitelist, sorteo activo,
 **ventana de ventas abierta** (`fecha_inicio_ventas <= now()` y `fecha_fin_ventas` nula
-o futura), **tope por compra** (`max_tickets_por_compra`) y cupo disponible contando
-los gratis. Nada de esto acredita identidad ni posesión del teléfono o el documento.
+o futura), ausencia de una cuarentena `P1003`, **tope por compra**
+(`max_tickets_por_compra`) y cupo disponible contando los gratis. El lock de la fila
+del sorteo serializa la consulta de cuarentena con las reservas concurrentes. Nada de
+esto acredita identidad ni posesión del teléfono o el documento.
 
 **Códigos de error propios.** El frontend los distingue por `error.code`, sin
 interpretar el texto del mensaje:
@@ -336,6 +379,7 @@ interpretar el texto del mensaje:
 | `P0001` | `comprar_tickets` | No hay cupo, la venta no está habilitada o el monto excede el límite admitido. |
 | `P1002` | `registrar_revision_boleto` | El boleto caducó mientras el admin lo revisaba: validarlo o devolverlo a `pendiente` falla. Hay que recargar; no puede reactivarse. |
 | `P1003` | `liberar_tickets_rechazados`, `caducar_boletos_pendientes` | El contador del sorteo no coincide con la suma de sus reservas. El rechazo (manual, de servicio o por caducidad) se revierte y la edición requiere conciliación manual. |
+| `P1004` | `comprar_tickets` | La edición tiene una incidencia `P1003` abierta. La venta está en pausa hasta resolverla; se distingue de falta de cupo o tope. |
 
 Superar el tope no crea boletos ni modifica el contador.
 
@@ -770,6 +814,11 @@ create trigger trg_resolver_incidencia_caducidad
   filas y `anon` no tiene `SELECT`. Que la fecha de reintento haya vencido no significa que
   esté resuelta. Es la consulta que debe usar el panel: el resultado del cron o la cantidad
   de caducados no bastan para detectar una cuarentena.
+- **`sorteo_en_cuarentena(uuid)`** expone a `anon`, `authenticated` y `service_role`
+  únicamente si existe una incidencia `P1003` abierta cuyo boleto continúa pendiente.
+  No revela boletos, motivo, fechas ni intentos, y devuelve `false` para `55P03`, porque
+  esa contención es transitoria. `comprar_tickets` usa la misma función después de
+  bloquear brevemente la fila del sorteo y rechaza con `P1004` antes de reservar cupo.
 - **Resolución**: validar o rechazar borra la incidencia de ese boleto en la misma
   transacción, y un `ROLLBACK` la restaura. **No concilia el contador**: si la edición sigue
   inconsistente, la siguiente reserva vencida vuelve a producir `P1003` sin esperar el
@@ -1117,7 +1166,8 @@ grant all on public.admins, public.sorteos, public.sorteo_premios,
   public.boletos, public.ganadores to service_role;
 grant all on sequence public.boletos_codigo_seq to service_role;
 
--- Las tres únicas funciones que el navegador puede invocar
+-- Las tres funciones públicas iniciales; la sexta migración agrega el booleano
+-- sorteo_en_cuarentena(uuid) con su propio grant.
 grant execute on function public.calcular_tickets_gratis(integer),
   public.calcular_monto_total(integer, integer),
   public.comprar_tickets(uuid, integer, text, text, text, text)
@@ -1223,6 +1273,7 @@ Resumen de quién ve y hace qué:
 | Ganadores | Lee | Lee | Lee, crea, edita y elimina |
 | Boletos | Sin acceso | Cero filas visibles | Lee todos, cambia `estado` y corrige `motivo_rechazo` (auditado) |
 | Incidencias de caducidad y `ediciones_en_cuarentena` | Sin acceso | Cero filas visibles | Lee; no borra ni edita (las resuelve validar o rechazar el boleto) |
+| `sorteo_en_cuarentena` | Consulta solo el booleano `P1003` | Ídem | Ídem; el detalle sigue en la vista admin |
 | Admins | Sin acceso | Solo su propia fila | Solo su propia fila |
 | Banners | Lee | Lee | Lee, sube, reemplaza y elimina |
 | Comprobantes | Sin acceso | Sin acceso | Sin acceso directo desde el navegador |
@@ -1288,7 +1339,7 @@ Ya lo revisé. Dos cosas importantes antes del detalle:
 
 **Modelo "4+1 gratis" en Tickets (resuelto):** el diseño mostraba "5 tickets · $25.000 COP" sin comunicar el gratis. Los quick-picks muestran ahora "5 tickets + 1 gratis · $25.000 COP" y bajo el total se detalla "Recibes 6 tickets: 5 comprados + 1 gratis". Montos y gratis salen de `calcular_monto_total`; el cliente solo replica `cantidad + cantidad / 4` para acotar el selector al cupo restante, y `comprar_tickets` vuelve a validarlo.
 
-**Cuándo no se ofrece el selector:** si la edición no abrió ventas, las cerró (o está inactiva) o no le queda cupo para una sola compra, `TicketsSection` muestra un aviso sin selector ni CTA. El máximo por compra es el menor entre `max_tickets_por_compra`, lo que cabe en el cupo restante contando los gratis y el rango de `integer` del monto. Se recalcula con cada refetch del sorteo, y la apertura o el cierre de ventas se aplican a la hora exacta sin recargar. La cuarentena no se refleja: ver pendiente #8.
+**Cuándo no se ofrece el selector:** si la edición no abrió ventas, las cerró (o está inactiva) o no le queda cupo para una sola compra, `TicketsSection` muestra un aviso sin selector ni CTA. El máximo por compra es el menor entre `max_tickets_por_compra`, lo que cabe en el cupo restante contando los gratis y el rango de `integer` del monto. Se recalcula con cada refetch del sorteo, y la apertura o el cierre de ventas se aplican a la hora exacta sin recargar. El servidor ya expone `sorteo_en_cuarentena`; conectar ese booleano a `TicketsSection` queda para el cambio de frontend. Aunque la UI aún no lo muestre, `comprar_tickets` bloquea la venta con `P1004`.
 
 **Textos del prototipo ajustados al flujo real (sección 3):** el paso 2 prometía "pasarela verificada y confirmación inmediata" y el 3, que el código "llega al instante a tu correo"; la revisión del pago es manual y no se guarda correo. El total decía "un código único por cada participación", pero cada compra genera un solo boleto con un código. El pase decía "Escanea para validar", y no existe validación por QR.
 
@@ -1298,8 +1349,8 @@ Ya lo revisé. Dos cosas importantes antes del detalle:
 
 Lo más importante primero — el punto donde un sitio de sorteos realmente se rompe bajo carga es la compra concurrente de tickets, así que el diseño de datos ya lo prioriza:
 
-1. **Sin sobreventa bajo concurrencia.** `comprar_tickets` (sección 2) reserva con un único `UPDATE ... WHERE tickets_vendidos + incremento <= tickets_totales`. Postgres resuelve esto con un lock de fila breve e implícito — no con un `SELECT FOR UPDATE` de transacción larga ni con un `SUM()` sobre toda la tabla `boletos` en cada compra, que se pondría cada vez más lento a medida que crece la tabla. El lock es por fila de `sorteos`, así que ediciones distintas no se bloquean entre sí; solo se serializan las compras de la *misma* edición, que es exactamente donde se necesita la protección.
-2. **Contador de lectura barata.** `tickets_vendidos` es denormalizado — el Hero y la barra de progreso lo leen directo, sin agregación. Se mantiene consistente con el trigger `liberar_tickets_rechazados`, que lo decrementa cuando se rechaza un boleto (manual, de servicio o por caducidad). Antes de descontar, ese trigger suma las reservas de la edición para detectar descuadres (`P1003`): es un costo por rechazo, también dentro del job, que `comprar_tickets` no paga.
+1. **Sin sobreventa bajo concurrencia.** `comprar_tickets` (sección 2) toma un lock breve de la fila del sorteo, comprueba la cuarentena y reserva con un `UPDATE ... WHERE tickets_vendidos + incremento <= tickets_totales`. El lock es por fila de `sorteos`, así que ediciones distintas no se bloquean entre sí; solo se serializan las compras de la *misma* edición. Después de esperar el lock, la consulta de incidencias usa una sentencia nueva y ve un `P1003` ya confirmado por otra transacción.
+2. **Contador de lectura barata.** `tickets_vendidos` es denormalizado — el Hero y la barra de progreso lo leen directo, sin agregación. Se mantiene consistente con el trigger `liberar_tickets_rechazados`, que lo decrementa cuando se rechaza un boleto (manual, de servicio o por caducidad). Antes de descontar, ese trigger suma las reservas de la edición para detectar descuadres (`P1003`): es un costo por rechazo, también dentro del job. La compra no calcula ese `SUM()`; solo hace un `EXISTS` indexado sobre incidencias abiertas para impedir ventas mientras se concilia la edición.
 3. **Índices** en las columnas por las que se filtra seguido: `boletos.sorteo_id`, `boletos.estado` (para `AdminBoletosPage`), `sorteo_id` en `sorteo_premios`/`ganadores`, y `premio_id`/`boleto_id` en `ganadores` para resolver el Hall of fame sin recorrer la tabla. El job de caducidad usa el índice parcial `idx_boletos_pendientes_caducidad` (`sorteo_id, pendiente_desde, id` solo sobre pendientes), que no crece con los boletos ya revisados. `boletos.numero_documento` también está indexado, pero hoy **no lo usa nadie**: la consulta pública por documento está cerrada hasta decidir el pendiente #6.
 4. **Code-splitting del bundle:** cargar `/admin/*` con `React.lazy` + `Suspense` en vez de en el bundle principal — los visitantes públicos (que son la mayoría del tráfico) no descargan el código del panel admin. `@supabase/supabase-js` ya entra en el bundle público porque la landing lee `sorteos` y `sorteo_premios`; Vite avisa que el chunk principal supera los 500 kB minificados.
 5. **Cacheo:** TanStack Query ya evita refetchear lo mismo en cada render; para las imágenes de premios/banners (que se comparten mucho por WhatsApp), usar las transformaciones de Supabase Storage o un CDN para servir tamaños optimizados en vez de la imagen original completa.
@@ -1318,15 +1369,13 @@ Lo más importante primero — el punto donde un sitio de sorteos realmente se r
 5. **`rechazado` es terminal por diseño.** Un boleto rechazado no se puede reactivar: su cupo ya volvió al contador y puede haberlo tomado otra persona, así que reactivarlo permitiría sobreventa. La red de seguridad contra un rechazo por error del admin va en la UI (`AdminBoletosPage`, con confirmación explícita antes de rechazar), **no en el esquema**. Si el rechazo fue un error, el camino es una compra nueva sujeta a disponibilidad.
 6. **`TicketLookupPage` no tiene camino de consulta todavía.** Buscar solo por número de documento no demuestra identidad y permite enumerar documentos, así que no se expone ningún endpoint público de búsqueda —ni como `select` ni como RPC— hasta decidir el mecanismo: un OTP al teléfono registrado (con límites por IP y destinatario, caducidad corta y respuesta genérica exista o no el documento), o un token de alta entropía entregado al comprar, guardado solo como hash y revocable. No se debe reutilizar el código `PD-00001`, el documento ni el UUID del boleto como credencial. Mientras tanto la ruta `/consulta` queda sin implementar y el índice `idx_boletos_numero_documento` no tiene consumidor.
 7. **`estado`, `tipo_documento`, `tipo` y `motivo_rechazo` salen como `string` en los tipos generados**, no como uniones: en la BD son CHECK constraints, no enums de Postgres, así que `supabase gen types` no puede estrecharlos y `Constants.public.Enums` viene vacío. Hay que decidir entre declarar las uniones a mano en el cliente (rápido, pero se desincroniza del esquema sin avisar) o convertirlos a enums de Postgres en una migración (los tipos generados quedan estrechos y sincronizados, a cambio de que agregar un valor nuevo sea una migración). Además, `src/lib/database.types.ts` ya incluye las columnas y objetos de la caducidad; hay que regenerarlo (`pnpm types` sobre una base con todas las migraciones) cada vez que cambie el esquema.
-8. **Venta durante una cuarentena (`P1003`).** La landing no puede saber si una edición está en cuarentena: `ediciones_en_cuarentena` no da `SELECT` a `anon` y una sesión sin admin ve cero filas. Tampoco es una compra imposible: `comprar_tickets` no consulta incidencias y sigue vendiendo. Pero con `P1003` el contador está por debajo de las reservas reales, así que el cupo que ve el público es mayor al verdadero y una compra puede sobrevender. Bloquearlo solo en el frontend no sirve, porque la RPC se invoca directo con la anon key. Hay que decidir en el servidor: que `comprar_tickets` rechace ediciones con una incidencia `P1003` abierta (con un código propio que el frontend muestre como "venta en pausa") y, si se quiere mostrar el estado antes de intentar, exponer solo ese booleano con una función `SECURITY DEFINER`, sin abrir la vista. La contención `55P03` es transitoria y no afecta a los compradores.
-
 ## 10. Setup local
 
 Requiere Docker corriendo y pnpm.
 
 ```bash
 pnpm install              # incluye el CLI de Supabase como devDependency
-pnpm run db:reset:local   # recrea la base local: 5 migraciones, pg_cron y seed (BORRA sus datos)
+pnpm run db:reset:local   # recrea la base local: 6 migraciones, pg_cron y seed (BORRA sus datos)
 pnpm supabase start       # levanta el resto de servicios: API, Auth, Storage y Studio
 pnpm types                # regenera src/lib/database.types.ts desde la base local
 pnpm dev

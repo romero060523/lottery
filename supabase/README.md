@@ -19,6 +19,8 @@ administrativo de migraciones, que puede acceder a las tablas sin RLS.
    inicio de pendiente, motivos corregibles, permisos e incidencias de caducidad.
 5. `migrations/20260916000200_programar_caducidad_pendientes.sql`: validación de
    `pg_cron` ya habilitado y programación cada cinco minutos.
+6. `migrations/20260916000300_bloquear_venta_en_cuarentena.sql`: booleano público
+   mínimo de cuarentena y bloqueo de compras mientras exista un `P1003` abierto.
 
 Al agregar o cambiar una migración, actualizar `docs/arquitectura.md` y correr
 `node supabase/scripts/verificar-arquitectura.mjs` antes del PR: compara sentencia por
@@ -41,8 +43,9 @@ El navegador puede ejecutar `comprar_tickets` con la anon key. La función es
 `SECURITY DEFINER` porque reserva cupo y crea un boleto aunque ese llamador no
 tenga permisos de escritura sobre las tablas. Usa `search_path = ''`, referencias
 calificadas por esquema y ninguna sentencia SQL dinámica. Se revoca la ejecución
-implícita de `PUBLIC` y solo se habilitan las tres RPC de compra/cálculo para
-`anon`, `authenticated` y el servicio. Los triggers no se exponen como RPC.
+implícita de `PUBLIC` y se habilitan las tres RPC de compra/cálculo y el booleano
+`sorteo_en_cuarentena` para `anon`, `authenticated` y el servicio. Los triggers no
+se exponen como RPC.
 
 Antes de escribir se comprueban cantidad positiva, valores nulos, tipo de documento,
 longitudes de nombre (1–200), teléfono y documento (1–32), sorteo activo, ventana
@@ -65,13 +68,17 @@ del sorteo habilitado para distinguir el error:
 
 | `error.code` de la RPC | Significado |
 | --- | --- |
+| `P1004` | La edición tiene una incidencia `P1003` abierta; la venta está pausada mientras se concilian sus reservas. |
 | `P1001` | La cantidad comprada supera `max_tickets_por_compra`; el mensaje incluye el máximo. |
 | `P0001` | No hay cupo, la venta no está habilitada o el monto excede el rango admitido. |
 
 El frontend puede discriminar por código sin interpretar el texto del mensaje.
 Superar el tope no crea boletos ni modifica el contador.
 
-La reserva usa un `UPDATE` condicionado por capacidad, incluidos los tickets gratis.
+La compra bloquea brevemente la fila del sorteo y consulta la cuarentena antes de
+reservar. Esto serializa la comprobación con las compras concurrentes y hace que una
+llamada que esperaba el lock vea el `P1003` confirmado por otra transacción. La
+reserva usa un `UPDATE` condicionado por capacidad, incluidos los tickets gratis.
 La creación del boleto pertenece a la misma transacción: si falla, la reserva se
 revierte. Los productos y sumas intermedios usan `bigint` para detectar desbordamientos;
 las columnas monetarias y los resultados continúan siendo `integer` en COP.
@@ -231,6 +238,19 @@ cero filas y `anon` carece de SELECT. No expone datos personales ni concede
 escritura. La UI y sus alertas quedan para el panel; consultar solo el resultado
 del cron o el número de caducados no basta para detectar una cuarentena.
 
+La RPC `sorteo_en_cuarentena(uuid)` da al cliente público únicamente el booleano
+necesario para pausar la compra. Es `SECURITY DEFINER`, usa `search_path = ''` y
+devuelve `true` solo si existe una incidencia `P1003` cuyo boleto continúa
+pendiente. No expone código, mensaje, boleto, fechas ni intentos de la vista
+administrativa. Una incidencia `55P03` devuelve `false`, porque representa
+contención transitoria y no debe detener a los compradores.
+
+`comprar_tickets` consulta ese booleano con la fila del sorteo bloqueada y lanza
+`P1004` antes de modificar el contador o crear el boleto. El código permite al
+frontend mostrar “venta en pausa” de forma distinta de `P1001` (tope) y `P0001`
+(cupo o ventana). La protección vive en la RPC y también cubre llamadas directas
+con la anon key.
+
 Al guardar `validado` o `rechazado`, un trigger elimina la incidencia de ese
 boleto dentro de la misma transacción, también en la revisión manual o del
 servicio. Un error o ROLLBACK restaura tanto estado como incidencia. El admin
@@ -307,8 +327,9 @@ actual, y las filas previas de un UPDATE múltiple ya reflejan su liberación. U
 trigger AFTER por fila vería todos los estados nuevos antes de haber restado todos
 los cupos y daría falsos desajustes. Esta [visibilidad de triggers](https://www.postgresql.org/docs/17/trigger-datachanges.html)
 permite rechazar varias reservas sanas en una sentencia y conservar la atomicidad.
-La suma por rechazo agrega costo también al job; no se agrega ninguna suma a
-`comprar_tickets` ni se modifica su camino de reserva.
+La suma por rechazo agrega costo también al job; `comprar_tickets` no calcula esa
+suma. Solo comprueba con `EXISTS` si hay una incidencia `P1003` abierta antes de
+seguir por el camino normal de reserva.
 
 Tras esa comprobación, la tarea cambia `pendiente` a `rechazado` y asigna su identificador de sistema.
 **No modifica `tickets_vendidos`, no llama directamente al liberador ni desactiva
@@ -371,7 +392,7 @@ resuelve aquí el caso de livelock ni se garantiza progreso de ese lote. Tambié
 se conserva el presupuesto de **1000 intentos por corrida**, sin rediseñar el
 reparto entre ediciones.
 
-**M4 resuelto:** `docs/arquitectura.md` ya describe las cinco migraciones, incluida la
+**M4 resuelto:** `docs/arquitectura.md` ya describe las seis migraciones, incluida la
 caducidad (columnas, constraints, permisos, incidencias, vista, job y liberador en
 `BEFORE`), y recoge M3 en sus pendientes.
 
@@ -382,7 +403,8 @@ puertos, usando CLI **2.117.0** y la imagen Supabase Postgres **17.6.1.167**:
 
 - Dos ejecuciones consecutivas de `pnpm run db:reset:local --workdir <pruebas>`
   terminaron sin errores; la primera inició sin contenedor previo y ambas
-  recrearon la base desde cero. Tras cada una: cinco migraciones, un sorteo de
+  recrearon la base desde cero. Tras cada una: las cinco migraciones entonces
+  existentes, un sorteo de
   seed con cuatro premios y un único job `caducar-boletos-pendientes`.
 - **34 pruebas pgTAP: PASS.** Se ejecutaron con `pnpm supabase test db --workdir
   <pruebas>` sobre la segunda base reconstruida.
@@ -398,10 +420,18 @@ ambos. Cada archivo toma primero el lock advisory del job y reinicia, dentro de 
 transacción, el plazo de los pendientes que ya existían: una compra abandonada en la
 base de desarrollo o una corrida simultánea de cron no alteran los resultados.
 
+La migración de bloqueo de venta se aplicó después desde cero en el mismo tipo de
+contenedor desechable, con el seed incluido. La suite completa quedó en **75 pruebas
+pgTAP: PASS**. Verifica que `P1004` prevalece sobre `P1001` en una edición con
+`P1003`, que no cambia contador ni crea boleto, que el booleano público no abre la
+vista administrativa, que `55P03` no pausa ventas y que resolver la incidencia
+limpia el booleano. No se aplicó nada al proyecto remoto ni a la base local habitual.
+
 `caducidad_regresion.sql` cubre el huérfano de 10 tickets en rechazo manual, rechazo
 desde validado, UPDATE múltiple sano, idempotencia, cron con edición
 sana/inconsistente, RLS de la vista, antigüedad del fallo, validación con rollback,
-incidencias tardías y rechazo tras conciliación. `caducidad_contrato.sql` fija TTL
+incidencias tardías, bloqueo público con `P1004`, semántica de `55P03` y rechazo tras
+conciliación. `caducidad_contrato.sql` fija TTL
 1–168, plazo desde cada entrada a pendiente y umbral estricto, autor y motivo de la
 caducidad, `P1002`, corrección auditada del motivo, origen cerrado de service_role,
 aislamiento de un error ordinario de fila, y función y job no expuestos.

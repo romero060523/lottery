@@ -96,6 +96,47 @@ select is((select motivo_rechazo from public.boletos where id = (select id from 
 select is((select codigo_error from public.incidencias_caducidad where boleto_id =
   (select id from casos where nombre = 'huerfano')), 'P1003', 'Se registra el desajuste');
 
+-- Una cuarentena P1003 bloquea la RPC pública sin abrir datos operativos.
+select ok(has_function_privilege('anon', 'public.sorteo_en_cuarentena(uuid)', 'EXECUTE'),
+  'anon puede consultar solo el booleano de cuarentena');
+set local role anon;
+select is(public.sorteo_en_cuarentena('92000000-0000-4000-8000-000000000001'), true,
+  'El booleano público refleja la cuarentena P1003');
+select throws_ok(
+  $$select public.comprar_tickets('92000000-0000-4000-8000-000000000001', 51,
+    'Compra bloqueada', '6', 'cedula', '6')$$,
+  'P1004', 'La venta de esta edición está pausada mientras se concilian sus reservas',
+  'P1004 prevalece y distingue la pausa del tope P1001');
+select throws_ok(
+  $$select public.comprar_tickets('92000000-0000-4000-8000-000000000002', 51,
+    'Compra con tope', '7', 'cedula', '7')$$,
+  'P1001', 'La cantidad comprada supera el máximo de 50 tickets por compra',
+  'Una edición sana conserva P1001 para el tope');
+reset role;
+select is((select tickets_vendidos from public.sorteos where edicion_numero = 900001), 10,
+  'La compra bloqueada no modifica el contador');
+select is((select count(*) from public.boletos where sorteo_id = '92000000-0000-4000-8000-000000000001'),
+  2::bigint, 'La compra bloqueada no crea boleto');
+
+-- La contención 55P03 es transitoria: se informa al admin, pero no pausa ventas.
+insert into casos
+select 'contencion', id from public.comprar_tickets(
+  '92000000-0000-4000-8000-000000000002', 1, 'Contención', '8', 'cedula', '8');
+insert into public.incidencias_caducidad (
+  boleto_id, sorteo_id, codigo_error, mensaje, primera_incidencia_en, registrado_en, reintentar_desde
+)
+select id, '92000000-0000-4000-8000-000000000002', '55P03', 'Lock transitorio',
+  statement_timestamp(), statement_timestamp(), statement_timestamp() + interval '10 minutes'
+from casos where nombre = 'contencion';
+set local role anon;
+select is(public.sorteo_en_cuarentena('92000000-0000-4000-8000-000000000002'), false,
+  '55P03 no pone la edición en cuarentena de venta');
+select lives_ok(
+  $$select public.comprar_tickets('92000000-0000-4000-8000-000000000002', 1,
+    'Venta habilitada', '9', 'cedula', '9')$$,
+  'Una incidencia 55P03 no bloquea la venta');
+reset role;
+
 create temporary table primera_deteccion as
 select primera_incidencia_en from public.incidencias_caducidad
 where boleto_id = (select id from casos where nombre = 'huerfano');
@@ -150,6 +191,8 @@ select is((select count(*) from public.incidencias_caducidad where boleto_id =
   (select id from casos where nombre = 'huerfano')), 0::bigint, 'La validación confirmable resuelve la incidencia');
 select is((select count(*) from public.ediciones_en_cuarentena where edicion_numero = 900001), 0::bigint,
   'La incidencia resuelta desaparece de la vista');
+select is(public.sorteo_en_cuarentena('92000000-0000-4000-8000-000000000001'), false,
+  'Resolver la incidencia limpia también el booleano público');
 select throws_ok(
   $$update public.boletos set estado = 'rechazado' where id = (select id from casos where nombre = 'huerfano')$$,
   'P1003', 'El contador del sorteo no coincide con sus boletos reservados; requiere conciliación',
