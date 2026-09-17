@@ -2,11 +2,10 @@ import { useParallax } from '../../hooks/useParallax'
 import { usePremios, type Premio } from '../../hooks/usePremios'
 import { useSorteoActual, type Sorteo } from '../../hooks/useSorteos'
 import { formatearCOP } from '../../utils/currency'
-import { formatearEntero } from '../../utils/number'
 import Photo from './Photo'
 import Reveal from './Reveal'
 
-/** Badges + countdown + contador de tickets registrados. */
+/** Badges, título, premio mayor y llamada a participar. */
 export default function HeroSection() {
   const { data: sorteo, isPending, isError } = useSorteoActual()
   const { data: premios } = usePremios(sorteo?.id)
@@ -126,40 +125,39 @@ function HeroContenido({ sorteo, premioMayor }: HeroContenidoProps) {
         </div>
       </div>
 
-      <div className="relative z-7 mt-[clamp(180px,26vw,240px)] flex flex-wrap items-end justify-between gap-[clamp(22px,4vw,60px)]">
-        <div className="max-w-[430px] min-w-[min(100%,280px)]">
+      {/* Bajo md la foto del premio cae bajo el título y crece con el ancho (56vw):
+          el margen crece con ella para que el botón no la tape.
+          Desde md la foto va a la derecha y el botón sube junto al título. */}
+      <div className="relative z-7 mt-[max(180px,calc(80vw-110px))] flex max-w-[560px] flex-col items-start md:mt-[clamp(36px,4vw,64px)]">
+        <Reveal as="div" variante="texto" desplazamiento={24} duracion={[0.8, 0.8]} className="w-full sm:w-auto">
+          <a
+            href="#tickets"
+            className="group flex w-full items-center justify-between gap-6 whitespace-nowrap sm:gap-10 rounded-full bg-tinta px-[clamp(32px,3.2vw,52px)] py-[clamp(24px,2.4vw,34px)] text-[clamp(15px,1.3vw,19px)] leading-none font-semibold tracking-[.14em] text-hueso uppercase hover:bg-morado hover:text-hueso sm:min-w-[440px]"
+          >
+            Participar ahora
+            <span
+              aria-hidden="true"
+              className="inline-block text-[clamp(22px,2vw,30px)] transition-transform duration-300 group-hover:translate-x-[10px]"
+            >
+              →
+            </span>
+          </a>
+        </Reveal>
+
+        <div className="mt-[clamp(28px,3vw,40px)] w-full max-w-[430px]">
           {sorteo.descripcion && (
             <Reveal
               as="p"
               variante="texto"
               desplazamiento={24}
               duracion={[0.8, 0.8]}
+              retraso={0.08}
               className="m-0 mb-[22px] text-[15px] leading-[1.55] text-pretty text-parrafo"
             >
               {sorteo.descripcion}
             </Reveal>
           )}
-          <div className="mb-[18px] h-px bg-tinta opacity-30" />
-        </div>
-
-        <div className="flex min-w-[min(100%,280px)] flex-col gap-3.5">
-          <a
-            href="#tickets"
-            className="group inline-flex items-center justify-between gap-6 rounded-full bg-tinta px-8 py-[22px] text-[13px] leading-none font-semibold tracking-[.14em] text-hueso uppercase hover:bg-morado hover:text-hueso"
-          >
-            Participar ahora
-            <span aria-hidden="true" className="inline-block text-[17px] transition-transform duration-300 group-hover:translate-x-[10px]">
-              →
-            </span>
-          </a>
-          <div className="flex items-baseline gap-2.5">
-            <span className="font-display text-[clamp(22px,3vw,34px)] leading-none text-morado">
-              {formatearEntero(sorteo.tickets_vendidos)}
-            </span>
-            <span className="text-[10px] leading-none font-semibold tracking-[.18em] text-parrafo uppercase">
-              / {formatearEntero(sorteo.tickets_totales)} tickets registrados
-            </span>
-          </div>
+          <div className="h-px bg-tinta opacity-30" />
         </div>
       </div>
     </>
