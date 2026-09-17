@@ -4,6 +4,12 @@ import { useEffect, useMemo, useRef } from 'react'
 import { useForm, useWatch } from 'react-hook-form'
 import { Link, useSearchParams } from 'react-router-dom'
 import TramaQr from '../components/landing/TramaQr'
+import AvisoEdad from '../components/registro/AvisoEdad'
+import CuandoVerasTickets from '../components/registro/CuandoVerasTickets'
+import InstruccionesPago from '../components/registro/InstruccionesPago'
+import ResumenTotal from '../components/registro/ResumenTotal'
+import SelectorCantidad from '../components/registro/SelectorCantidad'
+import SelectorPaquetes from '../components/registro/SelectorPaquetes'
 import { useComprarTickets, type ArgsCompra, type BoletoEmitido } from '../hooks/useComprarTickets'
 import { useMomentoAlcanzado } from '../hooks/useMomentoAlcanzado'
 import { useMontoTotal } from '../hooks/useMontoTotal'
@@ -33,7 +39,7 @@ function enteroDeParametro(valor: string | null): number | null {
 /**
  * Registro público: la primera pantalla que llama a `comprar_tickets`, la RPC
  * que reserva cupo de verdad (sección 3 de docs/arquitectura.md). Llega desde
- * `TicketsSection` con `?sorteo=` y `?cantidad=`, pero no se fía de ninguno:
+ * la landing con `?sorteo=` y, si viene, `?cantidad=`, pero no se fía de ninguno:
  * entre ver el precio y enviar el formulario la edición pudo agotarse, cerrar
  * ventas o entrar en pausa, así que el estado se vuelve a derivar del sorteo
  * recién leído y el servidor lo valida otra vez al reservar.
@@ -64,7 +70,7 @@ export default function RegisterFormPage() {
     <div aria-busy={isPending}>
       {contenido}
       <Link
-        to="/#tickets"
+        to="/"
         className="mt-[clamp(40px,6vh,72px)] inline-block text-[11px] leading-none font-semibold tracking-[.2em] text-parrafo uppercase hover:text-coral"
       >
         ← Volver al sorteo
@@ -82,16 +88,25 @@ function Registro({ sorteo, cantidadPedida }: { sorteo: Sorteo; cantidadPedida: 
   const estado = estadoVenta({ activo: sorteo.activo, iniciada, finalizada, maximo })
   const compra = useComprarTickets()
 
-  if (compra.data) return <PaseEmitido boleto={compra.data} sorteo={sorteo} />
+  if (compra.data) return <PaseEmitido boleto={compra.data} sorteo={sorteo} enviado={compra.variables} />
 
   return (
     <>
       <span className="mb-[18px] block text-[11px] leading-none font-semibold tracking-[.2em] text-morado uppercase">
         Edición {edicionDe(sorteo)} · {sorteo.nombre}
       </span>
-      <h1 className="m-0 mb-[clamp(28px,4vh,44px)] max-w-[16ch] font-display text-[clamp(34px,6vw,84px)] leading-[.88] tracking-[-.02em] uppercase">
+      <span className="mb-4 inline-block rounded-full border border-tinta bg-amarillo px-[13px] py-2 text-[9px] leading-none font-semibold tracking-[.16em] text-tinta uppercase">
+        Un solo paso
+      </span>
+      <h1 className="m-0 mb-[clamp(20px,3vh,32px)] max-w-[16ch] font-display text-[clamp(34px,6vw,84px)] leading-[.88] tracking-[-.02em] uppercase">
         Reserva tu pase.
       </h1>
+
+      <AvisoEdad />
+
+      <p className="mt-[22px] mb-[clamp(24px,4vh,38px)] text-[15px] leading-[1.55] text-parrafo">
+        Elige cuántos tickets quieres, deja tus datos y reserva tu cupo. Por cada 4 tickets comprados, 1 gratis.
+      </p>
 
       {/* El error explica el envío que falló; el aviso de abajo, en qué estado
           quedó la venta. Los dos hacen falta: pueden no coincidir. */}
@@ -134,6 +149,7 @@ function Formulario({ sorteo, maximo, cantidadPedida, enVuelo, onEnviar }: Formu
   const {
     control,
     register,
+    setValue,
     handleSubmit,
     formState: { errors },
   } = useForm<DatosRegistro>({
@@ -157,15 +173,7 @@ function Formulario({ sorteo, maximo, cantidadPedida, enVuelo, onEnviar }: Formu
   const total = useMontoTotal(cantidadValida ? cantidad : 0, sorteo.precio_boleto)
   const totalActual = total.data && !total.isPlaceholderData && total.data.cantidad_comprada === cantidad ? total.data : null
   const cupoAjustado = cantidadPedida !== null && cantidadPedida > maximo
-
-  function notaDelTotal() {
-    if (total.isError) return 'No pudimos calcular el total. El monto definitivo lo calcula el servidor al reservar.'
-    if (!cantidadValida) return 'Corrige la cantidad para ver el total.'
-    if (totalActual && totalActual.tickets_gratis > 0) {
-      return `Recibes ${plural(totalActual.cantidad_total, 'ticket', 'tickets')}: ${formatearEntero(totalActual.cantidad_comprada)} comprados + ${formatearEntero(totalActual.tickets_gratis)} gratis.`
-    }
-    return 'El monto definitivo lo calcula el servidor con el precio de la edición.'
-  }
+  const elegirCantidad = (nueva: number) => setValue('cantidad', nueva, { shouldValidate: true })
 
   // `enVuelo` deshabilita el botón, que es lo que frena el doble clic. El
   // pestillo contra los envíos que se adelantan a ese render lo pone
@@ -184,6 +192,48 @@ function Formulario({ sorteo, maximo, cantidadPedida, enVuelo, onEnviar }: Formu
   return (
     // noValidate: los mensajes los da Zod, no los globos del navegador.
     <form noValidate onSubmit={enviar} className="flex flex-col gap-[26px]">
+      <SelectorPaquetes precio={sorteo.precio_boleto} maximo={maximo} cantidad={cantidad} onElegir={elegirCantidad} />
+
+      <SelectorCantidad
+        cantidad={cantidad}
+        maximo={maximo}
+        enVuelo={enVuelo}
+        onCambiar={elegirCantidad}
+        error={errors.cantidad?.message}
+        ayuda={
+          cupoAjustado
+            ? `Pediste ${plural(cantidadPedida, 'ticket', 'tickets')} y ahora solo caben ${formatearEntero(maximo)} por compra: ajustamos la cantidad.`
+            : `Por cada 4 tickets comprados, 1 gratis. Hasta ${formatearEntero(maximo)} por compra.`
+        }
+      >
+        <input
+          id="cantidad"
+          aria-describedby="cantidad-nota"
+          type="number"
+          inputMode="numeric"
+          step={1}
+          min={1}
+          max={maximo}
+          disabled={enVuelo}
+          aria-invalid={errors.cantidad ? true : undefined}
+          className="w-full min-w-0 border-y border-tinta bg-hueso px-3 py-3.5 text-center font-display text-[24px] leading-none text-tinta outline-none focus-visible:border-morado disabled:opacity-60 aria-invalid:border-coral"
+          {...register('cantidad', { valueAsNumber: true })}
+        />
+      </SelectorCantidad>
+
+      <ResumenTotal
+        precio={sorteo.precio_boleto}
+        cantidad={cantidad}
+        cantidadValida={cantidadValida}
+        monto={total.data}
+        montoConfirmado={totalActual}
+        error={total.isError}
+      />
+
+      <InstruccionesPago variante="resumen" />
+
+      <h2 className="m-0 mt-2 font-display text-[clamp(22px,4vw,30px)] leading-[.95] tracking-[-.01em] uppercase">Tus datos</h2>
+
       <Campo etiqueta="Nombre completo" error={errors.nombre_comprador?.message} id="nombre_comprador">
         <input
           id="nombre_comprador"
@@ -249,46 +299,6 @@ function Formulario({ sorteo, maximo, cantidadPedida, enVuelo, onEnviar }: Formu
         />
       </Campo>
 
-      <Campo
-        etiqueta="Tickets a comprar"
-        error={errors.cantidad?.message}
-        id="cantidad"
-        ayuda={
-          cupoAjustado
-            ? `Pediste ${plural(cantidadPedida, 'ticket', 'tickets')} y ahora solo caben ${formatearEntero(maximo)} por compra: ajustamos la cantidad.`
-            : `Por cada 4 tickets comprados, 1 gratis. Hasta ${formatearEntero(maximo)} por compra.`
-        }
-      >
-        <input
-          id="cantidad"
-          aria-describedby="cantidad-nota"
-          type="number"
-          inputMode="numeric"
-          step={1}
-          min={1}
-          max={maximo}
-          disabled={enVuelo}
-          aria-invalid={errors.cantidad ? true : undefined}
-          className={CLASES_CAMPO}
-          {...register('cantidad', { valueAsNumber: true })}
-        />
-      </Campo>
-
-      <div className="border-t border-tinta/35 pt-[22px]">
-        <span className="mb-2 block text-[10px] leading-none font-semibold tracking-[.2em] text-parrafo uppercase">
-          Total a pagar
-        </span>
-        <div
-          aria-live="polite"
-          className={`font-display text-[clamp(40px,7vw,72px)] leading-[.9] tracking-[-.01em] text-morado transition-opacity duration-200 ease-[ease] ${totalActual ? '' : 'opacity-50'}`}
-        >
-          {/* Con una cantidad inválida no se muestra "$0 COP": se lee como un
-              precio real en vez de como un campo por corregir. */}
-          {cantidadValida && total.data ? `${formatearCOP(total.data.monto_total)} COP` : '—'}
-        </div>
-        <p className="mt-3 mb-0 text-[12px] leading-[1.5] text-parrafo">{notaDelTotal()}</p>
-      </div>
-
       <button
         type="submit"
         disabled={enVuelo}
@@ -303,9 +313,11 @@ function Formulario({ sorteo, maximo, cantidadPedida, enVuelo, onEnviar }: Formu
         </span>
       </button>
 
+      <CuandoVerasTickets ttlHoras={sorteo.ttl_pendientes_horas} />
+
       <p className="m-0 text-[11px] leading-[1.6] text-parrafo">
-        Al reservar guardamos tu cupo mientras un humano revisa el pago. La revisión es manual: no hay confirmación
-        automática y no enviamos nada por correo.
+        Guarda el comprobante de tu pago. Los tickets se registran después de que una persona revisa el pago: no hay
+        confirmación automática, no enviamos nada por correo y este cálculo no confirma una compra.
       </p>
     </form>
   )
@@ -471,7 +483,7 @@ function ErrorDeCompra({ error, ...contexto }: { error: PostgrestError } & Conte
  * correo, porque el sistema no hace ninguna de las dos (sección 7 de
  * docs/arquitectura.md): la revisión del pago es manual y no se guarda correo.
  */
-function PaseEmitido({ boleto, sorteo }: { boleto: BoletoEmitido; sorteo: Sorteo }) {
+function PaseEmitido({ boleto, sorteo, enviado }: { boleto: BoletoEmitido; sorteo: Sorteo; enviado: ArgsCompra | undefined }) {
   // `cantidad_total` es una columna generada; si el tipo la da como nula, se
   // recompone con los dos sumandos que la definen.
   const cantidadTotal = boleto.cantidad_total ?? boleto.cantidad_comprada + boleto.cantidad_gratis
@@ -534,6 +546,27 @@ function PaseEmitido({ boleto, sorteo }: { boleto: BoletoEmitido; sorteo: Sorteo
             </p>
           </div>
         </div>
+      </div>
+
+      <div className="mt-[clamp(28px,4vh,44px)] border-t border-tinta/35 pt-[22px]">
+        <h2 className="m-0 mb-4 font-display text-[clamp(22px,4vw,30px)] leading-[.95] tracking-[-.01em] uppercase">
+          Cómo pagar
+        </h2>
+        <InstruccionesPago
+          variante="completa"
+          datos={
+            enviado && {
+              nombre: enviado.p_nombre_comprador,
+              documento: enviado.p_numero_documento,
+              telefono: enviado.p_telefono,
+              monto: boleto.monto_total,
+            }
+          }
+        />
+      </div>
+
+      <div className="mt-[clamp(24px,4vh,36px)]">
+        <CuandoVerasTickets ttlHoras={sorteo.ttl_pendientes_horas} />
       </div>
 
       <div className="mt-[clamp(28px,4vh,44px)] border-t border-tinta/35 pt-[22px]">

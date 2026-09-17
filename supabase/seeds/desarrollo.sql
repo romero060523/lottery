@@ -4,7 +4,7 @@ begin;
 
 insert into public.sorteos (
   id, edicion_numero, nombre, subtitulo, descripcion, color_hex,
-  precio_boleto, tickets_totales, codigo_prefijo, activo
+  precio_boleto, tickets_totales, codigo_prefijo, fecha_fin_ventas, fecha_sorteo, activo
 ) values (
   'd0000000-0000-4000-8000-000000000001',
   1,
@@ -15,6 +15,8 @@ insert into public.sorteos (
   5000,
   5000,
   'PD',
+  now() + interval '8 days',
+  now() + interval '9 days',
   true
 ) on conflict (id) do nothing;
 

@@ -21,6 +21,8 @@ administrativo de migraciones, que puede acceder a las tablas sin RLS.
    `pg_cron` ya habilitado y programación cada cinco minutos.
 6. `migrations/20260916000300_bloquear_venta_en_cuarentena.sql`: pausa persistente
    por edición, bloqueo de compras/revisiones y conciliación administrativa auditada.
+7. `migrations/20260917000100_agregar_fecha_sorteo.sql`: columna opcional
+   `sorteos.fecha_sorteo`, validada contra las fechas de venta, con grants de admin.
 
 Al agregar o cambiar una migración, actualizar `docs/arquitectura.md` y correr
 `node supabase/scripts/verificar-arquitectura.mjs` antes del PR: compara sentencia por

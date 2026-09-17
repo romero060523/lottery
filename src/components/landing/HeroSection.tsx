@@ -1,20 +1,12 @@
-import { useCountdown, type Countdown } from '../../hooks/useCountdown'
+import { Link } from 'react-router-dom'
 import { useParallax } from '../../hooks/useParallax'
 import { usePremios, type Premio } from '../../hooks/usePremios'
 import { useSorteoActual, type Sorteo } from '../../hooks/useSorteos'
 import { formatearCOP } from '../../utils/currency'
-import { formatearEntero } from '../../utils/number'
 import Photo from './Photo'
 import Reveal from './Reveal'
 
-const dosDigitos = (n: number) => String(n).padStart(2, '0')
-
-/** "08 días · 14 h · 32 min · 00 s" */
-function formatearCountdown({ dias, horas, minutos, segundos }: Countdown) {
-  return `${dosDigitos(dias)} días · ${dosDigitos(horas)} h · ${dosDigitos(minutos)} min · ${dosDigitos(segundos)} s`
-}
-
-/** Badges + countdown + contador de tickets registrados. */
+/** Badges, título, premio mayor y llamada a participar. */
 export default function HeroSection() {
   const { data: sorteo, isPending, isError } = useSorteoActual()
   const { data: premios } = usePremios(sorteo?.id)
@@ -46,7 +38,6 @@ type HeroContenidoProps = {
 }
 
 function HeroContenido({ sorteo, premioMayor }: HeroContenidoProps) {
-  const countdown = useCountdown(sorteo.fecha_fin_ventas)
   const parallaxFotoPrincipal = useParallax(-0.16)
   const parallaxFotoAmbiente = useParallax(-0.3)
 
@@ -110,10 +101,12 @@ function HeroContenido({ sorteo, premioMayor }: HeroContenidoProps) {
             entra en el viewport en vez de sangrar por la derecha, donde el
             overflow-hidden de la sección le cortaba la sombra, y lleva la sombra
             morada que el sistema de diseño reserva para el premio mayor
-            (`--shadow-premio-mayor`, la misma de `PrizeCardMajor`). */}
+            (`--shadow-premio-mayor`, la misma de `PrizeCardMajor`).
+            Bajo md va en el flujo, centrada entre el título y el botón, y sin
+            parallax (el transform inline la empujaría contra ellos). */}
         <div
           ref={parallaxFotoPrincipal}
-          className="absolute top-[40%] right-[-2%] z-5 w-[56vw] will-change-transform md:top-[4%] md:right-[6%] md:w-[min(34vw,500px)]"
+          className="relative z-5 mx-auto mt-[clamp(40px,10vw,64px)] w-[min(72vw,360px)] will-change-transform max-md:[transform:none!important] md:absolute md:top-[4%] md:right-[6%] md:mx-0 md:mt-0 md:w-[min(34vw,500px)]"
         >
           <Reveal
             variante="foto"
@@ -135,50 +128,45 @@ function HeroContenido({ sorteo, premioMayor }: HeroContenidoProps) {
         </div>
       </div>
 
-      <div className="relative z-7 mt-[clamp(180px,26vw,240px)] flex flex-wrap items-end justify-between gap-[clamp(22px,4vw,60px)]">
-        <div className="max-w-[430px] min-w-[min(100%,280px)]">
+      {/* Desde md la foto va a la derecha y el botón sube junto al título. */}
+      <div className="relative z-7 mt-[clamp(56px,13vw,84px)] flex max-w-[560px] flex-col items-start md:mt-[clamp(52px,5vw,72px)]">
+        <Reveal as="div" variante="texto" desplazamiento={24} duracion={[0.8, 0.8]} className="w-full sm:w-auto">
+          {/* Capas: Reveal (entrada) → respiración (transform) → enlace, que en
+              hover usa `translate`, propiedad aparte que no pisa la respiración. */}
+          <div className="animate-respirar motion-reduce:animate-none has-[a:hover]:[animation-play-state:paused]">
+            <Link
+              to={`/registro?sorteo=${sorteo.id}`}
+              className="group relative isolate flex w-full items-center justify-between gap-6 overflow-hidden rounded-full bg-tinta px-[clamp(32px,3.2vw,52px)] py-[clamp(24px,2.4vw,34px)] text-[clamp(15px,1.3vw,19px)] leading-none font-semibold tracking-[.14em] whitespace-nowrap text-hueso uppercase transition-[translate,box-shadow] duration-300 hover:-translate-y-1 hover:shadow-foto active:translate-y-0.5 active:shadow-none sm:min-w-[440px] sm:gap-10"
+            >
+              <span
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-y-0 left-0 -z-10 w-1/4 animate-brillo bg-linear-to-r from-transparent via-hueso/25 to-transparent motion-reduce:hidden"
+              />
+              Participar ahora
+              <span
+                aria-hidden="true"
+                className="inline-block text-[clamp(22px,2vw,30px)] transition-transform duration-300 group-hover:translate-x-[10px]"
+              >
+                →
+              </span>
+            </Link>
+          </div>
+        </Reveal>
+
+        <div className="mt-[clamp(28px,3vw,40px)] w-full max-w-[430px]">
           {sorteo.descripcion && (
             <Reveal
               as="p"
               variante="texto"
               desplazamiento={24}
               duracion={[0.8, 0.8]}
+              retraso={0.08}
               className="m-0 mb-[22px] text-[15px] leading-[1.55] text-pretty text-parrafo"
             >
               {sorteo.descripcion}
             </Reveal>
           )}
-          <div className="mb-[18px] h-px bg-tinta opacity-30" />
-          {countdown && (
-            <>
-              <div className="mb-2 text-[11px] leading-none font-semibold tracking-[.18em] text-tinta uppercase">
-                Cierra en
-              </div>
-              <div className="font-display text-[clamp(26px,4vw,44px)] leading-none tracking-[.01em] text-tinta">
-                <time dateTime={sorteo.fecha_fin_ventas ?? undefined}>{formatearCountdown(countdown)}</time>
-              </div>
-            </>
-          )}
-        </div>
-
-        <div className="flex min-w-[min(100%,280px)] flex-col gap-3.5">
-          <a
-            href="#tickets"
-            className="group inline-flex items-center justify-between gap-6 rounded-full bg-tinta px-8 py-[22px] text-[13px] leading-none font-semibold tracking-[.14em] text-hueso uppercase hover:bg-morado hover:text-hueso"
-          >
-            Participar ahora
-            <span aria-hidden="true" className="inline-block text-[17px] transition-transform duration-300 group-hover:translate-x-[10px]">
-              →
-            </span>
-          </a>
-          <div className="flex items-baseline gap-2.5">
-            <span className="font-display text-[clamp(22px,3vw,34px)] leading-none text-morado">
-              {formatearEntero(sorteo.tickets_vendidos)}
-            </span>
-            <span className="text-[10px] leading-none font-semibold tracking-[.18em] text-parrafo uppercase">
-              / {formatearEntero(sorteo.tickets_totales)} tickets registrados
-            </span>
-          </div>
+          <div className="h-px bg-tinta opacity-30" />
         </div>
       </div>
     </>

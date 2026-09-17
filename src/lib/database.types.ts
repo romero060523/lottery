@@ -325,6 +325,7 @@ export type Database = {
           edicion_numero: number
           fecha_fin_ventas: string | null
           fecha_inicio_ventas: string
+          fecha_sorteo: string | null
           id: string
           max_tickets_por_compra: number
           nombre: string
@@ -346,6 +347,7 @@ export type Database = {
           edicion_numero: number
           fecha_fin_ventas?: string | null
           fecha_inicio_ventas?: string
+          fecha_sorteo?: string | null
           id?: string
           max_tickets_por_compra?: number
           nombre: string
@@ -367,6 +369,7 @@ export type Database = {
           edicion_numero?: number
           fecha_fin_ventas?: string | null
           fecha_inicio_ventas?: string
+          fecha_sorteo?: string | null
           id?: string
           max_tickets_por_compra?: number
           nombre?: string

@@ -1,15 +1,13 @@
 import { usePremios } from '../../hooks/usePremios'
 import { useSorteoActual } from '../../hooks/useSorteos'
-import PrizeCardMajor from './PrizeCardMajor'
 import PrizeCardSecondary from './PrizeCardSecondary'
 import Reveal from './Reveal'
 
-/** 1 premio mayor + N secundarios, desde sorteo_premios. */
+/** Premios secundarios en grilla, desde sorteo_premios. */
 export default function PremiosSection() {
   const { data: sorteo, isError: errorSorteo } = useSorteoActual()
   const { data: premios, isError: errorPremios } = usePremios(sorteo?.id)
 
-  const premioMayor = premios?.find((p) => p.tipo === 'mayor')
   const secundarios = premios?.filter((p) => p.tipo === 'secundario') ?? []
 
   return (
@@ -48,17 +46,13 @@ export default function PremiosSection() {
           No pudimos cargar los premios. Intenta de nuevo en unos minutos.
         </p>
       ) : (
-        <div className="flex flex-wrap items-start gap-[clamp(24px,4vw,56px)]">
-          {premioMayor && <PrizeCardMajor premio={premioMayor} />}
-
-          {secundarios.length > 0 && (
-            <div className="flex min-w-[min(100%,260px)] flex-[1_1_300px] flex-col gap-[clamp(30px,5vh,62px)] pt-[clamp(0px,6vw,90px)]">
-              {secundarios.map((premio, indice) => (
-                <PrizeCardSecondary key={premio.id} premio={premio} indice={indice} />
-              ))}
-            </div>
-          )}
-        </div>
+        secundarios.length > 0 && (
+          <div className="grid grid-cols-2 justify-center gap-x-[clamp(18px,6vw,96px)] gap-y-[clamp(56px,14vh,160px)] sm:grid-cols-[repeat(2,minmax(0,300px))] lg:grid-cols-[repeat(3,minmax(0,300px))]">
+            {secundarios.map((premio, indice) => (
+              <PrizeCardSecondary key={premio.id} premio={premio} indice={indice} />
+            ))}
+          </div>
+        )
       )}
     </section>
   )
