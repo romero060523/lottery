@@ -1297,26 +1297,31 @@ src/
       Photo.tsx                  // imagen_url o el placeholder del prototipo si es null
       MecanicaSection.tsx        // 3 pasos + preview del pase digital
         DigitalPassPreview.tsx   // código de ejemplo, precio, trama QR decorativa, estado
+      TramaQr.tsx                // trama decorativa del pase, compartida con el pase emitido
       TicketsSection.tsx         // selector de cantidad + quick-picks + total, o aviso si no hay venta
       TransparenciaSection.tsx   // stats + barra de progreso vendidos/restantes
-      GanadoresSection.tsx       // Hall of fame — lista con detalle al hacer hover
+      GanadoresSection.tsx       // Hall of fame — lista con detalle al hacer hover; no se
+                                 // renderiza mientras `ganadores` esté vacía
       FaqSection.tsx             // acordeón de preguntas frecuentes
   store/
     useSorteoStore.ts           // Zustand — sorteo seleccionado (equivalente a Pinia)
   hooks/
-    useSorteos.ts               // equivalente al composable useSorteos (+ useSorteoActual)
+    useSorteos.ts               // equivalente al composable useSorteos (+ useSorteoActual / useSorteoPorId)
     usePremios.ts               // sorteo_premios de un sorteo, por `orden`
     useCountdown.ts              // cuenta regresiva hasta fecha_fin_ventas
     useScrollReveal.ts           // animación de aparición al hacer scroll
     useParallax.ts              // desplazamiento vertical de las fotos
     useMontoTotal.ts            // preview con calcular_monto_total (no reserva cupo)
     useMomentoAlcanzado.ts      // true desde una fecha (apertura/cierre de ventas), un solo timer
+    useComprarTickets.ts        // compra con comprar_tickets (reserva cupo); sin reintentos
+    useGanadores.ts             // tabla ganadores para el Hall of fame
   lib/
     supabase.ts
   utils/
     currency.ts
     number.ts                   // enteros con separador de miles (es-CO)
     tickets.ts                  // cupo por compra, máximo comprable y estado de venta
+    registro.ts                 // esquema Zod del registro, espejo de los CHECK y de comprar_tickets
 ```
 
 ## 6. Perfiles: público vs admin

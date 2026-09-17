@@ -37,3 +37,16 @@ export function useSorteoActual() {
     select: (sorteos) => sorteos.find((s) => s.id === sorteoId) ?? sorteos[0] ?? null,
   })
 }
+
+/**
+ * El sorteo de un id concreto (p. ej. `?sorteo=` en `/registro`) o, sin id, la
+ * edición más reciente. `null` si ese id no está entre los sorteos activos: no
+ * se cambia en silencio por otra edición, porque quien llega con un id vio el
+ * precio y el cupo de esa. Comparte caché con `useSorteos`.
+ */
+export function useSorteoPorId(sorteoId: string | null | undefined) {
+  return useQuery({
+    ...sorteosQuery,
+    select: (sorteos) => (sorteoId ? sorteos.find((s) => s.id === sorteoId) ?? null : sorteos[0] ?? null),
+  })
+}
