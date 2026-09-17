@@ -1,4 +1,5 @@
 import FaqSection from '../components/landing/FaqSection'
+import FechasSorteoSection from '../components/landing/FechasSorteoSection'
 import GanadoresSection from '../components/landing/GanadoresSection'
 import HeroSection from '../components/landing/HeroSection'
 import MecanicaSection from '../components/landing/MecanicaSection'
@@ -10,6 +11,7 @@ export default function LandingPage() {
   return (
     <>
       <HeroSection />
+      <FechasSorteoSection />
       <PremiosSection />
       <MecanicaSection />
       <TicketsSection />

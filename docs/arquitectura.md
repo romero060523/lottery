@@ -1253,7 +1253,7 @@ corrida y no garantiza progreso de ese lote (caso de livelock abierto). El presu
 
 `20260917000100_agregar_fecha_sorteo.sql` agrega el momento en que se juega cada edición.
 Es opcional para no invalidar las ediciones existentes; si está, va después de abrir las
-ventas y no antes del cierre. La landing (`FechasSorteo`) muestra esta fecha y la del
+ventas y no antes del cierre. La franja `FechasSorteoSection`, entre el Hero y los premios, muestra esta fecha y la del
 cierre en hora de Colombia, con una cuenta regresiva hasta el cierre de ventas y, cuando
 cierran, hasta el sorteo.
 

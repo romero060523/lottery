@@ -3,7 +3,6 @@ import { usePremios, type Premio } from '../../hooks/usePremios'
 import { useSorteoActual, type Sorteo } from '../../hooks/useSorteos'
 import { formatearCOP } from '../../utils/currency'
 import { formatearEntero } from '../../utils/number'
-import FechasSorteo from './FechasSorteo'
 import Photo from './Photo'
 import Reveal from './Reveal'
 
@@ -142,8 +141,6 @@ function HeroContenido({ sorteo, premioMayor }: HeroContenidoProps) {
           )}
           <div className="mb-[18px] h-px bg-tinta opacity-30" />
         </div>
-
-        <FechasSorteo sorteo={sorteo} />
 
         <div className="flex min-w-[min(100%,280px)] flex-col gap-3.5">
           <a
