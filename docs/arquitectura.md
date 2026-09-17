@@ -64,18 +64,14 @@ create table public.sorteos (
   codigo_prefijo text not null default 'PD' check (char_length(btrim(codigo_prefijo)) between 1 and 20),
   fecha_inicio_ventas timestamptz not null default now(),
   fecha_fin_ventas timestamptz,
-  fecha_sorteo timestamptz, -- cuándo se juega; la landing muestra la cuenta regresiva
   activo boolean not null default true,
   creado_por uuid references public.admins(user_id),      -- auditoría; la asigna un trigger, no el cliente
   actualizado_por uuid references public.admins(user_id), -- auditoría; la asigna un trigger, no el cliente
   created_at timestamptz not null default now(),
   -- ttl_pendientes_horas la agrega la migración de caducidad (ver "Caducidad de pendientes")
   constraint sorteos_capacidad_valida check (tickets_vendidos between 0 and tickets_totales),
-  constraint sorteos_fechas_validas check (fecha_fin_ventas is null or fecha_fin_ventas > fecha_inicio_ventas),
-  constraint sorteos_fecha_sorteo_valida check (
-    fecha_sorteo is null
-    or (fecha_sorteo > fecha_inicio_ventas and (fecha_fin_ventas is null or fecha_sorteo >= fecha_fin_ventas))
-  )
+  -- fecha_sorteo la agrega su propia migración (ver "Fecha del sorteo")
+  constraint sorteos_fechas_validas check (fecha_fin_ventas is null or fecha_fin_ventas > fecha_inicio_ventas)
 );
 
 -- Premios por sorteo (el diseño distingue un premio mayor de varios secundarios)
@@ -1253,6 +1249,27 @@ hasta que vuelva a correr.
 corrida y no garantiza progreso de ese lote (caso de livelock abierto). El presupuesto de
 1000 intentos por corrida tampoco reparte entre ediciones.
 
+### Fecha del sorteo
+
+`20260917000100_agregar_fecha_sorteo.sql` agrega el momento en que se juega cada edición.
+Es opcional para no invalidar las ediciones existentes; si está, va después de abrir las
+ventas y no antes del cierre. La landing (`FechasSorteo`) muestra esta fecha y la del
+cierre en hora de Colombia, con una cuenta regresiva hasta el cierre de ventas y, cuando
+cierran, hasta el sorteo.
+
+```sql
+alter table public.sorteos add column fecha_sorteo timestamptz;
+
+alter table public.sorteos add constraint sorteos_fecha_sorteo_valida check (
+  fecha_sorteo is null
+  or (fecha_sorteo > fecha_inicio_ventas and (fecha_fin_ventas is null or fecha_sorteo >= fecha_fin_ventas))
+);
+
+-- Los grants por columna no incluyen columnas nuevas: el admin necesita poder escribirla.
+grant insert (fecha_sorteo) on public.sorteos to authenticated;
+grant update (fecha_sorteo) on public.sorteos to authenticated;
+```
+
 ## 3. Pagos: fase manual ahora, automatizada después
 
 La forma de pago queda en blanco por ahora — el esquema ya está preparado para no requerir migraciones cuando se implemente.
@@ -1365,6 +1382,7 @@ grant update (
   fecha_inicio_ventas, fecha_fin_ventas, activo
 ) on public.sorteos to authenticated;
 -- Caducidad: ttl_pendientes_horas recibe su propio grant de insert y update.
+-- Fecha del sorteo: fecha_sorteo también (ver "Fecha del sorteo" en la sección 2).
 grant delete on public.sorteos to authenticated;
 grant insert, update, delete on public.sorteo_premios, public.ganadores to authenticated;
 
