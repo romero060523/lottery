@@ -104,15 +104,22 @@ function HeroContenido({ sorteo, premioMayor }: HeroContenidoProps) {
           </Reveal>
         </h1>
 
+        {/* El premio mayor manda en el hero. Sube el tope de 380 a 460 px pero
+            conserva el 34vw: así solo crece donde sobra ancho (desde ~1350 px) y
+            el encuadre apretado del desktop angosto queda como estaba. Además
+            entra en el viewport en vez de sangrar por la derecha, donde el
+            overflow-hidden de la sección le cortaba la sombra, y lleva la sombra
+            morada que el sistema de diseño reserva para el premio mayor
+            (`--shadow-premio-mayor`, la misma de `PrizeCardMajor`). */}
         <div
           ref={parallaxFotoPrincipal}
-          className="absolute top-[40%] -right-[2%] z-5 w-[56vw] will-change-transform md:top-[6%] md:-right-[1%] md:w-[min(34vw,380px)]"
+          className="absolute top-[40%] right-[-2%] z-5 w-[56vw] will-change-transform md:top-[4%] md:right-[6%] md:w-[min(34vw,500px)]"
         >
           <Reveal
             variante="foto"
             rotacion={-7}
             duracion={[1, 1.2]}
-            className="relative flex aspect-[4/5] items-end border border-tinta bg-placeholder p-3.5 shadow-foto"
+            className="relative flex aspect-[4/5] items-end border border-tinta bg-placeholder p-3.5 shadow-foto md:shadow-premio-mayor"
           >
             <Photo
               src={premioMayor?.imagen_url ?? null}
@@ -124,26 +131,6 @@ function HeroContenido({ sorteo, premioMayor }: HeroContenidoProps) {
             <span className="absolute top-3 left-3 rounded-full bg-coral px-3 py-1.5 text-[9px] leading-none font-semibold tracking-[.16em] text-hueso uppercase">
               Premio principal
             </span>
-          </Reveal>
-        </div>
-
-        <div
-          ref={parallaxFotoAmbiente}
-          className="absolute top-[104%] left-[2%] z-6 w-[34vw] will-change-transform md:top-[88%] md:left-[42%] md:w-[min(19vw,200px)]"
-        >
-          <Reveal
-            variante="foto"
-            rotacion={8}
-            duracion={[1, 1.2]}
-            retraso={0.15}
-            className="relative flex aspect-square items-end border border-tinta bg-placeholder-alt p-3 shadow-foto-sm"
-          >
-            <Photo
-              src={sorteo.banner_url}
-              alt=""
-              placeholder="Ambiente de concierto"
-              className="text-[10px] leading-[1.3]"
-            />
           </Reveal>
         </div>
       </div>
