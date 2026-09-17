@@ -1,18 +1,11 @@
-import { useCountdown, type Countdown } from '../../hooks/useCountdown'
 import { useParallax } from '../../hooks/useParallax'
 import { usePremios, type Premio } from '../../hooks/usePremios'
 import { useSorteoActual, type Sorteo } from '../../hooks/useSorteos'
 import { formatearCOP } from '../../utils/currency'
 import { formatearEntero } from '../../utils/number'
+import FechasSorteo from './FechasSorteo'
 import Photo from './Photo'
 import Reveal from './Reveal'
-
-const dosDigitos = (n: number) => String(n).padStart(2, '0')
-
-/** "08 días · 14 h · 32 min · 00 s" */
-function formatearCountdown({ dias, horas, minutos, segundos }: Countdown) {
-  return `${dosDigitos(dias)} días · ${dosDigitos(horas)} h · ${dosDigitos(minutos)} min · ${dosDigitos(segundos)} s`
-}
 
 /** Badges + countdown + contador de tickets registrados. */
 export default function HeroSection() {
@@ -46,7 +39,6 @@ type HeroContenidoProps = {
 }
 
 function HeroContenido({ sorteo, premioMayor }: HeroContenidoProps) {
-  const countdown = useCountdown(sorteo.fecha_fin_ventas)
   const parallaxFotoPrincipal = useParallax(-0.16)
   const parallaxFotoAmbiente = useParallax(-0.3)
 
@@ -149,17 +141,9 @@ function HeroContenido({ sorteo, premioMayor }: HeroContenidoProps) {
             </Reveal>
           )}
           <div className="mb-[18px] h-px bg-tinta opacity-30" />
-          {countdown && (
-            <>
-              <div className="mb-2 text-[11px] leading-none font-semibold tracking-[.18em] text-tinta uppercase">
-                Cierra en
-              </div>
-              <div className="font-display text-[clamp(26px,4vw,44px)] leading-none tracking-[.01em] text-tinta">
-                <time dateTime={sorteo.fecha_fin_ventas ?? undefined}>{formatearCountdown(countdown)}</time>
-              </div>
-            </>
-          )}
         </div>
+
+        <FechasSorteo sorteo={sorteo} />
 
         <div className="flex min-w-[min(100%,280px)] flex-col gap-3.5">
           <a

@@ -64,13 +64,18 @@ create table public.sorteos (
   codigo_prefijo text not null default 'PD' check (char_length(btrim(codigo_prefijo)) between 1 and 20),
   fecha_inicio_ventas timestamptz not null default now(),
   fecha_fin_ventas timestamptz,
+  fecha_sorteo timestamptz, -- cuándo se juega; la landing muestra la cuenta regresiva
   activo boolean not null default true,
   creado_por uuid references public.admins(user_id),      -- auditoría; la asigna un trigger, no el cliente
   actualizado_por uuid references public.admins(user_id), -- auditoría; la asigna un trigger, no el cliente
   created_at timestamptz not null default now(),
   -- ttl_pendientes_horas la agrega la migración de caducidad (ver "Caducidad de pendientes")
   constraint sorteos_capacidad_valida check (tickets_vendidos between 0 and tickets_totales),
-  constraint sorteos_fechas_validas check (fecha_fin_ventas is null or fecha_fin_ventas > fecha_inicio_ventas)
+  constraint sorteos_fechas_validas check (fecha_fin_ventas is null or fecha_fin_ventas > fecha_inicio_ventas),
+  constraint sorteos_fecha_sorteo_valida check (
+    fecha_sorteo is null
+    or (fecha_sorteo > fecha_inicio_ventas and (fecha_fin_ventas is null or fecha_sorteo >= fecha_fin_ventas))
+  )
 );
 
 -- Premios por sorteo (el diseño distingue un premio mayor de varios secundarios)
