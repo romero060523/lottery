@@ -47,7 +47,7 @@ export default function PremiosSection() {
         </p>
       ) : (
         secundarios.length > 0 && (
-          <div className="grid grid-cols-[minmax(0,300px)] justify-center gap-x-[clamp(32px,6vw,96px)] gap-y-[clamp(96px,14vh,160px)] sm:grid-cols-[repeat(2,minmax(0,300px))] lg:grid-cols-[repeat(3,minmax(0,300px))]">
+          <div className="grid grid-cols-2 justify-center gap-x-[clamp(18px,6vw,96px)] gap-y-[clamp(56px,14vh,160px)] sm:grid-cols-[repeat(2,minmax(0,300px))] lg:grid-cols-[repeat(3,minmax(0,300px))]">
             {secundarios.map((premio, indice) => (
               <PrizeCardSecondary key={premio.id} premio={premio} indice={indice} />
             ))}

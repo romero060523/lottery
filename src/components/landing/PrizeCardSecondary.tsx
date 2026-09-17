@@ -57,16 +57,16 @@ export default function PrizeCardSecondary({ premio, indice }: PrizeCardSecondar
         />
         {premio.badge_label && (
           <span
-            className={`absolute top-3 left-3 rounded-full px-3 py-1.5 text-[9px] leading-none font-semibold tracking-[.16em] uppercase ${variante.badge}`}
+            className={`absolute top-2 left-2 rounded-full px-2 py-1 text-[9px] leading-none font-semibold tracking-[.16em] uppercase sm:top-3 sm:left-3 sm:px-3 sm:py-1.5 ${variante.badge}`}
           >
             {premio.badge_label}
           </span>
         )}
       </Reveal>
 
-      <div className="mt-6 flex items-end justify-between gap-3.5">
+      <div className="mt-4 flex items-end justify-between gap-3.5 sm:mt-6">
         <div>
-          <h3 className="m-0 font-display text-[clamp(26px,3.6vw,42px)] leading-[.92] uppercase">{premio.nombre}</h3>
+          <h3 className="m-0 font-display text-[clamp(20px,3.6vw,42px)] leading-[.92] uppercase">{premio.nombre}</h3>
           {premio.valor_referencial !== null && (
             <span className="mt-[7px] block text-[11px] leading-none font-medium tracking-[.14em] text-parrafo uppercase">
               {formatearCOP(premio.valor_referencial)} COP
@@ -78,7 +78,7 @@ export default function PrizeCardSecondary({ premio, indice }: PrizeCardSecondar
         <button
           type="button"
           aria-label={`Ver detalles de ${premio.nombre}`}
-          className="group size-11 flex-none cursor-pointer rounded-full border border-tinta bg-transparent text-[13.333px] text-tinta hover:bg-tinta hover:text-hueso"
+          className="group hidden size-11 flex-none cursor-pointer rounded-full border border-tinta bg-transparent text-[13.333px] text-tinta hover:bg-tinta hover:text-hueso sm:inline-block"
         >
           <span aria-hidden="true" className="inline-block transition-transform duration-300 group-hover:translate-x-[10px]">
             →
