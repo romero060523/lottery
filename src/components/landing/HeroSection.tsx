@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom'
 import { useParallax } from '../../hooks/useParallax'
 import { usePremios, type Premio } from '../../hooks/usePremios'
 import { useSorteoActual, type Sorteo } from '../../hooks/useSorteos'
@@ -133,8 +134,8 @@ function HeroContenido({ sorteo, premioMayor }: HeroContenidoProps) {
           {/* Capas: Reveal (entrada) → respiración (transform) → enlace, que en
               hover usa `translate`, propiedad aparte que no pisa la respiración. */}
           <div className="animate-respirar motion-reduce:animate-none has-[a:hover]:[animation-play-state:paused]">
-            <a
-              href="#tickets"
+            <Link
+              to={`/registro?sorteo=${sorteo.id}`}
               className="group relative isolate flex w-full items-center justify-between gap-6 overflow-hidden rounded-full bg-tinta px-[clamp(32px,3.2vw,52px)] py-[clamp(24px,2.4vw,34px)] text-[clamp(15px,1.3vw,19px)] leading-none font-semibold tracking-[.14em] whitespace-nowrap text-hueso uppercase transition-[translate,box-shadow] duration-300 hover:-translate-y-1 hover:shadow-foto active:translate-y-0.5 active:shadow-none sm:min-w-[440px] sm:gap-10"
             >
               <span
@@ -148,7 +149,7 @@ function HeroContenido({ sorteo, premioMayor }: HeroContenidoProps) {
               >
                 →
               </span>
-            </a>
+            </Link>
           </div>
         </Reveal>
 

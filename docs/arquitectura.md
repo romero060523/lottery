@@ -1311,20 +1311,25 @@ src/
       CursorDot.tsx              // punto que sigue el cursor y cambia de color por sección
       Footer.tsx
     landing/
-      HeroSection.tsx            // badges + countdown + contador de tickets registrados
+      HeroSection.tsx            // badges + título + premio mayor + CTA a /registro
       PremiosSection.tsx
         PrizeCardMajor.tsx       // premio "mayor", card grande
         PrizeCardSecondary.tsx   // premios "secundarios" (top pick / bonus), se repite
       Reveal.tsx                 // aparición al hacer scroll (texto que sube / foto que gira)
       Photo.tsx                  // imagen_url o el placeholder del prototipo si es null
-      MecanicaSection.tsx        // 3 pasos + preview del pase digital
-        DigitalPassPreview.tsx   // código de ejemplo, precio, trama QR decorativa, estado
-      TramaQr.tsx                // trama decorativa del pase, compartida con el pase emitido
-      TicketsSection.tsx         // selector de cantidad + quick-picks + total, o aviso si no hay venta
+      FechasSorteoSection.tsx    // fecha del sorteo, cierre de ventas y cuenta regresiva
+      TramaQr.tsx                // trama decorativa del pase emitido
       TransparenciaSection.tsx   // stats + barra de progreso vendidos/restantes
       GanadoresSection.tsx       // Hall of fame — lista con detalle al hacer hover; no se
                                  // renderiza mientras `ganadores` esté vacía
       FaqSection.tsx             // acordeón de preguntas frecuentes
+    registro/
+      AvisoEdad.tsx              // requisito de mayoría de edad
+      SelectorPaquetes.tsx       // tarjetas de 1/3/5/10 tickets con total y gratis
+      SelectorCantidad.tsx       // stepper para cualquier otra cantidad
+      ResumenTotal.tsx           // detalle, total a pagar y tickets que se reciben
+      InstruccionesPago.tsx      // datos de pago y qué escribir en el comentario
+      CuandoVerasTickets.tsx     // plazo de la reserva + enlace a /consulta
   store/
     useSorteoStore.ts           // Zustand — sorteo seleccionado (equivalente a Pinia)
   hooks/
@@ -1559,18 +1564,18 @@ Ya lo revisé. Dos cosas importantes antes del detalle:
 | Sección del diseño | Componente | Datos que necesita |
 |---|---|---|
 | Header + menú fullscreen | `Header`, `MobileNav` | — (estático) |
-| Hero: badges, countdown, contador de tickets | `HeroSection` | `sorteos.fecha_fin_ventas` (countdown), `tickets_totales`/`tickets_vendidos` (contador, lectura directa) |
+| Hero: badges, título, premio mayor y CTA | `HeroSection` | `sorteos.nombre`, `precio_boleto` (badge) y el premio `mayor` de `sorteo_premios` |
+| Fechas: sorteo, cierre de ventas y cuenta regresiva | `FechasSorteoSection` | `sorteos.fecha_sorteo` y `fecha_fin_ventas` |
 | Premios: 1 mayor + 3 secundarios | `PremiosSection` | `sorteo_premios` filtrado por `tipo` |
-| Mecánica: 3 pasos + pase digital de ejemplo | `MecanicaSection`, `DigitalPassPreview` | `precio_boleto`, `ttl_pendientes_horas`, `codigo_prefijo`, `edicion_numero`. El código del pase es de ejemplo (`PD-00000`, fuera de la secuencia real): el público no lee `boletos` |
-| Tickets: selector de cantidad + quick-picks | `TicketsSection` | `calcular_monto_total` (preview de total y gratis); límite con `max_tickets_por_compra`, `tickets_totales`/`tickets_vendidos` y la ventana de ventas. `comprar_tickets` queda para `RegisterFormPage` |
+| Compra: paquetes, cantidad, total, datos y pago | `RegisterFormPage` con `components/registro/` | `calcular_monto_total` (preview de total y gratis); límite con `max_tickets_por_compra`, `tickets_totales`/`tickets_vendidos` y la ventana de ventas; `comprar_tickets` al reservar. La landing ya no ofrece selector: su CTA lleva a `/registro` |
 | Transparencia: stats + barra de progreso | `TransparenciaSection` | `tickets_totales` y `tickets_vendidos` — lectura directa, sin agregación |
 | Ganadores (Hall of fame) | `GanadoresSection` | tabla `ganadores` |
 | FAQ | `FaqSection` | estático por ahora (ver pendiente #2) |
 | Footer | `Footer` | — (estático) |
 
-**Modelo "4+1 gratis" en Tickets (resuelto):** el diseño mostraba "5 tickets · $25.000 COP" sin comunicar el gratis. Los quick-picks muestran ahora "5 tickets + 1 gratis · $25.000 COP" y bajo el total se detalla "Recibes 6 tickets: 5 comprados + 1 gratis". Montos y gratis salen de `calcular_monto_total`; el cliente solo replica `cantidad + cantidad / 4` para acotar el selector al cupo restante, y `comprar_tickets` vuelve a validarlo.
+**Modelo "4+1 gratis" en Tickets (resuelto):** el diseño mostraba "5 tickets · $25.000 COP" sin comunicar el gratis. Las tarjetas de paquetes muestran "5 tickets + 1 gratis · $25.000 COP" y bajo el total se detalla "Recibes 6 tickets: 5 comprados + 1 gratis". Montos y gratis salen de `calcular_monto_total`; el cliente solo replica `cantidad + cantidad / 4` para acotar el selector al cupo restante, y `comprar_tickets` vuelve a validarlo.
 
-**Cuándo no se ofrece el selector:** si la edición no abrió ventas, las cerró (o está inactiva) o no le queda cupo para una sola compra, `TicketsSection` muestra un aviso sin selector ni CTA. El máximo por compra es el menor entre `max_tickets_por_compra`, lo que cabe en el cupo restante contando los gratis y el rango de `integer` del monto. Se recalcula con cada refetch del sorteo, y la apertura o el cierre de ventas se aplican a la hora exacta sin recargar. El servidor ya expone `sorteo_en_cuarentena`; conectar ese booleano a `TicketsSection` queda para el cambio de frontend. Aunque la UI aún no lo muestre, `comprar_tickets` bloquea la venta con `P1004`.
+**Cuándo no se ofrece el selector:** si la edición no abrió ventas, las cerró (o está inactiva) o no le queda cupo para una sola compra, `RegisterFormPage` muestra un aviso sin selector ni formulario. El máximo por compra es el menor entre `max_tickets_por_compra`, lo que cabe en el cupo restante contando los gratis y el rango de `integer` del monto. Se recalcula con cada refetch del sorteo, y la apertura o el cierre de ventas se aplican a la hora exacta sin recargar. El servidor ya expone `sorteo_en_cuarentena`; conectar ese booleano a la pantalla de compra queda para el cambio de frontend. Aunque la UI aún no lo muestre, `comprar_tickets` bloquea la venta con `P1004`.
 
 **Textos del prototipo ajustados al flujo real (sección 3):** el paso 2 prometía "pasarela verificada y confirmación inmediata" y el 3, que el código "llega al instante a tu correo"; la revisión del pago es manual y no se guarda correo. El total decía "un código único por cada participación", pero cada compra genera un solo boleto con un código. El pase decía "Escanea para validar", y no existe validación por QR.
 
