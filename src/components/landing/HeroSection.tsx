@@ -100,10 +100,12 @@ function HeroContenido({ sorteo, premioMayor }: HeroContenidoProps) {
             entra en el viewport en vez de sangrar por la derecha, donde el
             overflow-hidden de la sección le cortaba la sombra, y lleva la sombra
             morada que el sistema de diseño reserva para el premio mayor
-            (`--shadow-premio-mayor`, la misma de `PrizeCardMajor`). */}
+            (`--shadow-premio-mayor`, la misma de `PrizeCardMajor`).
+            Bajo md va en el flujo, centrada entre el título y el botón, y sin
+            parallax (el transform inline la empujaría contra ellos). */}
         <div
           ref={parallaxFotoPrincipal}
-          className="absolute top-[40%] right-[-2%] z-5 w-[56vw] will-change-transform md:top-[4%] md:right-[6%] md:w-[min(34vw,500px)]"
+          className="relative z-5 mx-auto mt-[clamp(40px,10vw,64px)] w-[min(72vw,360px)] will-change-transform max-md:[transform:none!important] md:absolute md:top-[4%] md:right-[6%] md:mx-0 md:mt-0 md:w-[min(34vw,500px)]"
         >
           <Reveal
             variante="foto"
@@ -125,10 +127,8 @@ function HeroContenido({ sorteo, premioMayor }: HeroContenidoProps) {
         </div>
       </div>
 
-      {/* Bajo md la foto del premio cae bajo el título y crece con el ancho (56vw):
-          el margen crece con ella para que el botón no la tape.
-          Desde md la foto va a la derecha y el botón sube junto al título. */}
-      <div className="relative z-7 mt-[max(180px,calc(80vw-110px))] flex max-w-[560px] flex-col items-start md:mt-[clamp(36px,4vw,64px)]">
+      {/* Desde md la foto va a la derecha y el botón sube junto al título. */}
+      <div className="relative z-7 mt-[clamp(56px,13vw,84px)] flex max-w-[560px] flex-col items-start md:mt-[clamp(52px,5vw,72px)]">
         <Reveal as="div" variante="texto" desplazamiento={24} duracion={[0.8, 0.8]} className="w-full sm:w-auto">
           {/* Capas: Reveal (entrada) → respiración (transform) → enlace, que en
               hover usa `translate`, propiedad aparte que no pisa la respiración. */}
