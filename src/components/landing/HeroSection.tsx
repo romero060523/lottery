@@ -130,18 +130,26 @@ function HeroContenido({ sorteo, premioMayor }: HeroContenidoProps) {
           Desde md la foto va a la derecha y el botón sube junto al título. */}
       <div className="relative z-7 mt-[max(180px,calc(80vw-110px))] flex max-w-[560px] flex-col items-start md:mt-[clamp(36px,4vw,64px)]">
         <Reveal as="div" variante="texto" desplazamiento={24} duracion={[0.8, 0.8]} className="w-full sm:w-auto">
-          <a
-            href="#tickets"
-            className="group flex w-full items-center justify-between gap-6 whitespace-nowrap sm:gap-10 rounded-full bg-tinta px-[clamp(32px,3.2vw,52px)] py-[clamp(24px,2.4vw,34px)] text-[clamp(15px,1.3vw,19px)] leading-none font-semibold tracking-[.14em] text-hueso uppercase hover:bg-morado hover:text-hueso sm:min-w-[440px]"
-          >
-            Participar ahora
-            <span
-              aria-hidden="true"
-              className="inline-block text-[clamp(22px,2vw,30px)] transition-transform duration-300 group-hover:translate-x-[10px]"
+          {/* Capas: Reveal (entrada) → respiración (transform) → enlace, que en
+              hover usa `translate`, propiedad aparte que no pisa la respiración. */}
+          <div className="animate-respirar motion-reduce:animate-none has-[a:hover]:[animation-play-state:paused]">
+            <a
+              href="#tickets"
+              className="group relative isolate flex w-full items-center justify-between gap-6 overflow-hidden rounded-full bg-tinta px-[clamp(32px,3.2vw,52px)] py-[clamp(24px,2.4vw,34px)] text-[clamp(15px,1.3vw,19px)] leading-none font-semibold tracking-[.14em] whitespace-nowrap text-hueso uppercase transition-[translate,box-shadow] duration-300 hover:-translate-y-1 hover:shadow-foto active:translate-y-0.5 active:shadow-none sm:min-w-[440px] sm:gap-10"
             >
-              →
-            </span>
-          </a>
+              <span
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-y-0 left-0 -z-10 w-1/4 animate-brillo bg-linear-to-r from-transparent via-hueso/25 to-transparent motion-reduce:hidden"
+              />
+              Participar ahora
+              <span
+                aria-hidden="true"
+                className="inline-block text-[clamp(22px,2vw,30px)] transition-transform duration-300 group-hover:translate-x-[10px]"
+              >
+                →
+              </span>
+            </a>
+          </div>
         </Reveal>
 
         <div className="mt-[clamp(28px,3vw,40px)] w-full max-w-[430px]">

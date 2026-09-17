@@ -57,6 +57,22 @@
     100% { transform: scale(1); }
   }
 
+  /* Botón principal: crece y vuelve en bucle */
+  --animate-respirar: respirar 2.6s ease-in-out infinite;
+
+  @keyframes respirar {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.03); }
+  }
+
+  /* Reflejo que cruza el botón; el 60 % restante del ciclo queda en reposo */
+  --animate-brillo: brillo 3.6s ease-in-out infinite;
+
+  @keyframes brillo {
+    0% { transform: translateX(-120%) skewX(-20deg); }
+    40%, 100% { transform: translateX(520%) skewX(-20deg); }
+  }
+
   /* Sombras duras, sin blur */
   --shadow-*: initial;
   --shadow-foto: 16px 20px 0 rgba(42, 42, 42, .14);
