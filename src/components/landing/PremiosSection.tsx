@@ -30,7 +30,7 @@ export default function PremiosSection() {
         duracion={[0.9, 1]}
         className="m-0 max-w-[14ch] font-display text-[clamp(44px,11vw,166px)] leading-[.86] tracking-[-.02em] uppercase"
       >
-        Este line-up es para ti.
+        Este Sorteo es para ti.
       </Reveal>
       <Reveal
         as="p"
